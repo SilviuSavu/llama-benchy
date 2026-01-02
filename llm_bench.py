@@ -82,7 +82,7 @@ def measure_latency(client, mode="models", model_name=None):
     print(f"Measuring latency using mode: {mode}...")
     latencies = []
     for _ in range(3):
-        start = time.time()
+        start = time.perf_counter()
         try:
             if mode == "models":
                 client.models.list()
@@ -94,7 +94,7 @@ def measure_latency(client, mode="models", model_name=None):
                     messages=[{"role": "user", "content": "hello"}],
                     max_tokens=1
                 )
-            latencies.append(time.time() - start)
+            latencies.append(time.perf_counter() - start)
         except Exception as e:
             print(f"Error measuring latency: {e}")
     
@@ -160,7 +160,7 @@ def main():
                         if args.no_cache:
                             extra_body["cache_prompt"] = False
                         
-                        start_time = time.time()
+                        start_time = time.perf_counter()
 
                         stream = client.chat.completions.create(
                             model=args.model,
@@ -179,7 +179,7 @@ def main():
                                 
                                 if content or reasoning_content:
                                     if token_count == 0:
-                                        first_token_time = time.time()
+                                        first_token_time = time.perf_counter()
                                         e2e_ttft = first_token_time - start_time
                                         ttft = e2e_ttft-latency
                                         if ttft < 0:
@@ -187,7 +187,7 @@ def main():
                                     
                                     token_count += 1
                         
-                        end_time = time.time()
+                        end_time = time.perf_counter()
                         
                         if token_count > 0:
                             # Calculate decode time (time for subsequent tokens)
