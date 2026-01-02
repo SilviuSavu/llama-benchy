@@ -135,7 +135,8 @@ async def main():
     
     # Use a large timeout for long-running benchmarks
     timeout = aiohttp.ClientTimeout(total=3600)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    connector = aiohttp.TCPConnector(limit=1, force_close=False, keepalive_timeout=600)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector, trust_env=True) as session:
         await warmup(session, args.base_url, args.api_key, args.model)
         latency = await measure_latency(session, args.base_url, args.api_key, args.latency_mode, args.model)
         
@@ -175,18 +176,27 @@ async def main():
                             if args.no_cache:
                                 payload["cache_prompt"] = False
                             
-                            # Disable keep-alive to avoid "Server disconnected" errors on some servers
-                            headers = {"Authorization": f"Bearer {args.api_key}", "Connection": "close"}
+                            headers = {"Authorization": f"Bearer {args.api_key}"}
                             
                             start_time = time.perf_counter()
 
                             async with session.post(f"{args.base_url}/chat/completions", json=payload, headers=headers) as response:
-                                async for line in response.content:
-                                    line = line.decode('utf-8').strip()
+                                if response.status != 200:
+                                    error_text = await response.text()
+                                    print(f"Error: {response.status} - {error_text}")
+                                    continue
+
+                                while True:
+                                    line_bytes = await response.content.readline()
+                                    if not line_bytes:
+                                        break
+                                    
+                                    line = line_bytes.decode('utf-8').strip()
                                     if not line or line == 'data: [DONE]':
                                         continue
                                     
                                     if line.startswith('data: '):
+                                        chunk_time = time.perf_counter()
                                         try:
                                             chunk = json.loads(line[6:])
                                             if 'choices' in chunk and len(chunk['choices']) > 0:
@@ -197,7 +207,7 @@ async def main():
                                                 if content or reasoning_content:
                                                     if token_count == 0:
                                                         first_token_time = time.perf_counter()
-                                                        e2e_ttft = first_token_time - start_time
+                                                        e2e_ttft = chunk_time - start_time
                                                         ttft = e2e_ttft-latency
                                                         if ttft < 0:
                                                             ttft = 0
