@@ -31,6 +31,7 @@ def parse_arguments():
     parser.add_argument("--book-url", type=str, default="https://www.gutenberg.org/files/1661/1661-0.txt", help="URL of a book to use for text generation, defaults to Sherlock Holmes (https://www.gutenberg.org/files/1661/1661-0.txt)")
     parser.add_argument("--latency-mode", type=str, default="models", choices=["models", "generation", "none"], help="Method to measure latency: 'models' (list models) - default, 'generation' (single token generation), or 'none' (skip latency measurement)")
     parser.add_argument("--no-warmup", action="store_true", help="Skip warmup phase")
+    parser.add_argument("--adapt-prompt", action="store_true", help="Adapt prompt size based on warmup token usage delta")
     return parser.parse_args()
 
 def get_tokenizer(model_name, tokenizer_name=None):
@@ -144,20 +145,32 @@ async def measure_latency(session, base_url, api_key, mode="models", model_name=
         return avg_latency
     return 0
 
-async def warmup(session, base_url, api_key, model):
+async def warmup(session, base_url, api_key, model, tokenizer=None):
     print("Warming up...")
     headers = {"Authorization": f"Bearer {api_key}"}
+    warmup_text = "Warmup " * 10
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": "Warmup " * 10}],
+        "messages": [{"role": "user", "content": warmup_text}],
         "max_tokens": 1
     }
+    token_usage_delta = 0
     try:
         async with session.post(f"{base_url}/chat/completions", json=payload, headers=headers) as response:
-            await response.read()
-        print("Warmup complete.")
+            response_json = await response.json()
+            if tokenizer:
+                if 'usage' in response_json:
+                    prompt_tokens = response_json['usage']['prompt_tokens']
+                    local_tokens = len(tokenizer.encode(warmup_text, add_special_tokens=False))
+                    token_usage_delta = prompt_tokens - local_tokens
+                    print(f"Warmup complete. Delta: {token_usage_delta} tokens (Server: {prompt_tokens}, Local: {local_tokens})")
+                else:
+                    print("Warmup complete (no usage stats found).")
+            else:
+                print("Warmup complete.")
     except Exception as e:
         print(f"Warmup failed: {e}")
+    return token_usage_delta
 
 async def main():
     args = parse_arguments()
@@ -171,8 +184,14 @@ async def main():
     timeout = aiohttp.ClientTimeout(total=3600)
     connector = aiohttp.TCPConnector(limit=1, force_close=False, keepalive_timeout=600)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector, trust_env=True) as session:
-        if not args.no_warmup:
-            await warmup(session, args.base_url, args.api_key, args.model)
+        token_usage_delta = 0
+        should_warmup = not args.no_warmup
+        if args.adapt_prompt:
+            should_warmup = True
+            
+        if should_warmup:
+            token_usage_delta = await warmup(session, args.base_url, args.api_key, args.model, tokenizer if args.adapt_prompt else None)
+
         latency = await measure_latency(session, args.base_url, args.api_key, args.latency_mode, args.model)
         
         results = []
@@ -188,7 +207,10 @@ async def main():
                     e2e_ttft_values = []
                     
                     for run in range(args.runs):
-                        context, prompt = generate_prompt(all_tokens, tokenizer, pp, depth, args.no_cache)
+                        current_pp = pp
+                        if args.adapt_prompt:
+                            current_pp = max(1, pp - token_usage_delta)
+                        context, prompt = generate_prompt(all_tokens, tokenizer, current_pp, depth, args.no_cache)
                         messages = []
                         if context:
                             messages.append({"role": "system", "content": context})
