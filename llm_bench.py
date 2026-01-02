@@ -12,6 +12,7 @@ import aiohttp
 import asyncio
 import json
 import codecs
+import hashlib
 from transformers import AutoTokenizer
 import requests
 
@@ -27,7 +28,7 @@ def parse_arguments():
     parser.add_argument("--runs", type=int, default=3, help="Number of runs per test")
     parser.add_argument("--no-cache", action="store_true", help="Ensure unique requests to avoid prefix caching")
     parser.add_argument("--post-run-cmd", type=str, default=None, help="Command to execute after each test run")
-    parser.add_argument("--book-url", type=str, default="https://www.gutenberg.org/files/11/11-0.txt", help="URL of a book to use for text generation")
+    parser.add_argument("--book-url", type=str, default="https://www.gutenberg.org/files/1661/1661-0.txt", help="URL of a book to use for text generation")
     parser.add_argument("--latency-mode", type=str, default="models", choices=["models", "generation"], help="Method to measure latency: 'models' (list models) or 'generation' (single token generation)")
     return parser.parse_args()
 
@@ -40,20 +41,41 @@ def get_tokenizer(model_name, tokenizer_name=None):
         print("Falling back to 'gpt2' tokenizer as approximation.")
         return AutoTokenizer.from_pretrained("gpt2")
 
-def prepare_text_data(book_url):
+def prepare_text_data(book_url, tokenizer):
     try:
-        response = requests.get(book_url)
-        response.raise_for_status()
-        text = response.text
-        # Basic cleanup
-        start_idx = text.find("*** START OF THE PROJECT GUTENBERG EBOOK")
-        if start_idx != -1:
-            text = text[start_idx:]
-        return text
+        # Create cache directory if it doesn't exist
+        cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "llama-bench-4all")
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        # Generate hash of the URL for the filename
+        url_hash = hashlib.md5(book_url.encode()).hexdigest()
+        cache_file = os.path.join(cache_dir, f"{url_hash}.txt")
+        
+        if os.path.exists(cache_file):
+            print(f"Loading text from cache: {cache_file}")
+            with open(cache_file, "r", encoding="utf-8") as f:
+                text = f.read()
+        else:
+            print(f"Downloading book from {book_url}...")
+            response = requests.get(book_url)
+            response.raise_for_status()
+            text = response.text
+            # Basic cleanup
+            start_idx = text.find("*** START OF THE PROJECT GUTENBERG EBOOK")
+            if start_idx != -1:
+                text = text[start_idx:]
+            
+            # Save to cache
+            with open(cache_file, "w", encoding="utf-8") as f:
+                f.write(text)
+            print(f"Saved text to cache: {cache_file}")
+            
+        return tokenizer.encode(text, add_special_tokens=False)
     except Exception as e:
         print(f"Error downloading book: {e}")
         print("Using synthetic data.")
-        return " ".join(["word"] * 100000)
+        text = " ".join(["word"] * 100000)
+        return tokenizer.encode(text, add_special_tokens=False)
 
 def generate_prompt(all_tokens, tokenizer, prompt_tokens, context_tokens=0, no_cache=False):
     suffix = ""
@@ -137,8 +159,8 @@ async def main():
     print(f"Benchmarking model: {args.model} at {args.base_url}")
     
     tokenizer = get_tokenizer(args.model, args.tokenizer)
-    text_data = prepare_text_data(args.book_url)
-    all_tokens = tokenizer.encode(text_data, add_special_tokens=False)
+    all_tokens = prepare_text_data(args.book_url, tokenizer)
+    print(f"Total tokens available in text corpus: {len(all_tokens)}")
     
     # Use a large timeout for long-running benchmarks
     timeout = aiohttp.ClientTimeout(total=3600)
