@@ -49,12 +49,33 @@ python llm_bench.py --base-url <ENDPOINT_URL> --model <MODEL_NAME> --pp <PROMPT_
 
 ### Metrics
 
-The script outputs a table with the following metrics:
+The script outputs a table with the following metrics. All time measurements are in milliseconds (ms).
 
--   `t/s`: Tokens per second (processing speed).
--   `ttft (ms)`: Time To First Token (End-to-End TTFT minus estimated network latency).
--   `ttfr (ms)`: Time To First Response (Time to receive the first chunk of data minus estimated network latency).
--   `e2e_ttft (ms)`: End-to-End Time To First Token (Time from sending request to receiving first token).
+#### Latency Adjustment
+The script attempts to estimate network latency to provide "server-side" processing times.
+- **Latency**: Measured based on `--latency-mode`.
+  - `models`: Time to fetch `/models` (from sending request to getting first byte of the response).
+  - `generation`: Time to generate 1 token (from sending request to getting first byte of the response).
+  - `none`: Assumed to be 0.
+- This measured latency is subtracted from `e2e_ttft` and `ttfr` to calculate `ttft` and `ttfr`.
+
+#### Table Columns
+
+-   **`t/s` (Tokens per Second)**:
+    -   **For Prompt Processing (pp)**: Calculated as `Total Prompt Tokens / TTFR`. This represents the prefill speed.
+    -   **For Token Generation (tg)**: Calculated as `(Total Generated Tokens - 1) / (Time of Last Token - Time of First Token)`. This represents the decode speed, excluding the first token latency.
+
+-   **`ttft (ms)` (Time To First Token)**:
+    -   Calculation: `End-to-End TTFT - Estimated Latency`.
+    -   Represents the time the server takes to process the prompt and generate the *first content token*.
+
+-   **`ttfr (ms)` (Time To First Response)**:
+    -   Calculation: `(Time of First Response Chunk - Start Time) - Estimated Latency`.
+    -   Represents the time until the client receives *any* response from the server (including empty chunks or role definitions), adjusted for latency. Used for calculating Prompt Processing speed.
+
+-   **`e2e_ttft (ms)` (End-to-End Time To First Token)**:
+    -   Calculation: `Time of First Content Token - Start Time`.
+    -   The total time perceived by the client from sending the request to seeing the first generated content.
 
 ### Example
 
