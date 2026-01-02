@@ -11,6 +11,7 @@ from tabulate import tabulate
 import aiohttp
 import asyncio
 import json
+import codecs
 from transformers import AutoTokenizer
 import requests
 
@@ -186,35 +187,38 @@ async def main():
                                     print(f"Error: {response.status} - {error_text}")
                                     continue
 
-                                while True:
-                                    line_bytes = await response.content.readline()
-                                    if not line_bytes:
-                                        break
+                                buffer = ""
+                                decoder = codecs.getincrementaldecoder("utf-8")(errors='replace')
+                                async for chunk_bytes in response.content:
+                                    chunk_time = time.perf_counter()
+                                    decoded_chunk = decoder.decode(chunk_bytes, final=False)
+                                    buffer += decoded_chunk
                                     
-                                    line = line_bytes.decode('utf-8').strip()
-                                    if not line or line == 'data: [DONE]':
-                                        continue
-                                    
-                                    if line.startswith('data: '):
-                                        chunk_time = time.perf_counter()
-                                        try:
-                                            chunk = json.loads(line[6:])
-                                            if 'choices' in chunk and len(chunk['choices']) > 0:
-                                                delta = chunk['choices'][0].get('delta', {})
-                                                content = delta.get('content')
-                                                reasoning_content = delta.get('reasoning_content')
-                                                
-                                                if content or reasoning_content:
-                                                    if token_count == 0:
-                                                        first_token_time = time.perf_counter()
-                                                        e2e_ttft = chunk_time - start_time
-                                                        ttft = e2e_ttft-latency
-                                                        if ttft < 0:
-                                                            ttft = 0
-                                                    
-                                                    token_count += 1
-                                        except json.JSONDecodeError:
+                                    while "\n" in buffer:
+                                        line, buffer = buffer.split("\n", 1)
+                                        line = line.strip()
+                                        if not line or line == 'data: [DONE]':
                                             continue
+                                        
+                                        if line.startswith('data: '):
+                                            try:
+                                                chunk = json.loads(line[6:])
+                                                if 'choices' in chunk and len(chunk['choices']) > 0:
+                                                    delta = chunk['choices'][0].get('delta', {})
+                                                    content = delta.get('content')
+                                                    reasoning_content = delta.get('reasoning_content')
+                                                    
+                                                    if content or reasoning_content:
+                                                        if token_count == 0:
+                                                            first_token_time = chunk_time
+                                                            e2e_ttft = first_token_time - start_time
+                                                            ttft = e2e_ttft-latency
+                                                            if ttft < 0:
+                                                                ttft = 0
+                                                        
+                                                        token_count += 1
+                                            except json.JSONDecodeError:
+                                                continue
                             
                             end_time = time.perf_counter()
                             
