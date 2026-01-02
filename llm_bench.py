@@ -8,7 +8,9 @@ import uuid
 import subprocess
 import numpy as np
 from tabulate import tabulate
-from openai import OpenAI
+import aiohttp
+import asyncio
+import json
 from transformers import AutoTokenizer
 import requests
 
@@ -78,22 +80,27 @@ def generate_prompt(text, tokenizer, prompt_tokens, context_tokens=0, no_cache=F
         
     return context_text, prompt_text
 
-def measure_latency(client, mode="models", model_name=None):
+async def measure_latency(session, base_url, api_key, mode="models", model_name=None):
     print(f"Measuring latency using mode: {mode}...")
     latencies = []
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
     for _ in range(3):
         start = time.perf_counter()
         try:
             if mode == "models":
-                client.models.list()
+                async with session.get(f"{base_url}/models", headers=headers) as response:
+                    await response.read()
             elif mode == "generation":
                 if not model_name:
                     raise ValueError("Model name required for generation latency mode")
-                client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": "hello"}],
-                    max_tokens=1
-                )
+                payload = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "max_tokens": 1
+                }
+                async with session.post(f"{base_url}/chat/completions", json=payload, headers=headers) as response:
+                    await response.read()
             latencies.append(time.perf_counter() - start)
         except Exception as e:
             print(f"Error measuring latency: {e}")
@@ -104,157 +111,169 @@ def measure_latency(client, mode="models", model_name=None):
         return avg_latency
     return 0
 
-def warmup(client, model):
+async def warmup(session, base_url, api_key, model):
     print("Warming up...")
+    headers = {"Authorization": f"Bearer {api_key}"}
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Warmup " * 10}],
+        "max_tokens": 1
+    }
     try:
-        client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "Warmup " * 10}],
-            max_tokens=1
-        )
+        async with session.post(f"{base_url}/chat/completions", json=payload, headers=headers) as response:
+            await response.read()
         print("Warmup complete.")
     except Exception as e:
         print(f"Warmup failed: {e}")
 
-def main():
+async def main():
     args = parse_arguments()
     print(f"Benchmarking model: {args.model} at {args.base_url}")
     
     tokenizer = get_tokenizer(args.model, args.tokenizer)
     text_data = prepare_text_data(args.book_url)
     
-    client = OpenAI(base_url=args.base_url, api_key=args.api_key)
-    
-    warmup(client, args.model)
-    latency = measure_latency(client, args.latency_mode, args.model)
-    
-    results = []
-    
-    for depth in args.depth:
-        for pp in args.pp:
-            for tg in args.tg:
-                print(f"Running test: pp={pp}, tg={tg}, depth={depth}")
-                pp_speeds = []
-                tg_speeds = []
-                ttft_values = []
-                e2e_ttft_values = []
-                
-                for run in range(args.runs):
-                    context, prompt = generate_prompt(text_data, tokenizer, pp, depth, args.no_cache)
-                    messages = []
-                    if context:
-                        messages.append({"role": "system", "content": context})
-                    messages.append({"role": "user", "content": prompt})
+    # Use a large timeout for long-running benchmarks
+    timeout = aiohttp.ClientTimeout(total=3600)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        await warmup(session, args.base_url, args.api_key, args.model)
+        latency = await measure_latency(session, args.base_url, args.api_key, args.latency_mode, args.model)
+        
+        results = []
+        
+        for depth in args.depth:
+            for pp in args.pp:
+                for tg in args.tg:
+                    print(f"Running test: pp={pp}, tg={tg}, depth={depth}")
+                    pp_speeds = []
+                    tg_speeds = []
+                    ttft_values = []
+                    e2e_ttft_values = []
                     
-                    ttft = 0
-                    e2e_ttft = 0
-                    token_count = 0
-                    first_token_time = 0
-                    
-                    try:
-                        extra_body = {}
-                        # extra_body["temperature"] = 0
-                        # extra_body["n_predict"] = tg
-                        # extra_body["seed"] = 42
+                    for run in range(args.runs):
+                        context, prompt = generate_prompt(text_data, tokenizer, pp, depth, args.no_cache)
+                        messages = []
+                        if context:
+                            messages.append({"role": "system", "content": context})
+                        messages.append({"role": "user", "content": prompt})
                         
-                        if args.no_cache:
-                            extra_body["cache_prompt"] = False
+                        ttft = 0
+                        e2e_ttft = 0
+                        token_count = 0
+                        first_token_time = 0
                         
-                        start_time = time.perf_counter()
-
-                        stream = client.chat.completions.create(
-                            model=args.model,
-                            messages=messages,
-                            max_tokens=tg,
-                            stream=True,
-                            extra_body=extra_body
-                        )
-                        
-                        for chunk in stream:
-                            if chunk.choices:
-                                delta = chunk.choices[0].delta
-                                # Support for reasoning models that return reasoning_content
-                                content = delta.content
-                                reasoning_content = getattr(delta, "reasoning_content", None)
-                                
-                                if content or reasoning_content:
-                                    if token_count == 0:
-                                        first_token_time = time.perf_counter()
-                                        e2e_ttft = first_token_time - start_time
-                                        ttft = e2e_ttft-latency
-                                        if ttft < 0:
-                                            ttft = 0
-                                    
-                                    token_count += 1
-                        
-                        end_time = time.perf_counter()
-                        
-                        if token_count > 0:
-                            # Calculate decode time (time for subsequent tokens)
-                            # If only 1 token, decode_time is effectively 0, so we can't calculate inter-token speed
-                            if token_count > 1:
-                                decode_time = end_time - first_token_time
-                                if decode_time > 0:
-                                    # Speed for the generated tokens (excluding the first one which is TTFT)
-                                    tg_speeds.append((token_count - 1) / decode_time)
-                                else:
-                                    # Fallback if time is too small
-                                    tg_speeds.append((token_count - 1) / 0.0001)
-                            
-                            if ttft > 0:
-                                # Use total prompt tokens (pp + depth) for speed calculation
-                                # as the server processes the full context (especially with no-cache).
-                                total_prompt_tokens = pp + depth
-                                pp_speeds.append(total_prompt_tokens / ttft)
-                                ttft_values.append(ttft)
-
-                            if e2e_ttft > 0:
-                                e2e_ttft_values.append(e2e_ttft)
-
-                    except Exception as e:
-                        print(f"Error during run: {e}")
-                        continue
-                    
-                    if args.post_run_cmd:
                         try:
-                            subprocess.run(args.post_run_cmd, shell=True, check=True)
-                        except subprocess.CalledProcessError as e:
-                            print(f"Post-run command failed: {e}")
+                            payload = {
+                                "model": args.model,
+                                "messages": messages,
+                                "max_tokens": tg,
+                                "stream": True,
+                                # "temperature": 0,
+                                # "seed": 42
+                            }
+                            
+                            if args.no_cache:
+                                payload["cache_prompt"] = False
+                            
+                            # Disable keep-alive to avoid "Server disconnected" errors on some servers
+                            headers = {"Authorization": f"Bearer {args.api_key}", "Connection": "close"}
+                            
+                            start_time = time.perf_counter()
 
-                # Aggregate results
-                if pp_speeds:
-                    pp_mean = np.mean(pp_speeds)
-                    pp_std = np.std(pp_speeds)
+                            async with session.post(f"{args.base_url}/chat/completions", json=payload, headers=headers) as response:
+                                async for line in response.content:
+                                    line = line.decode('utf-8').strip()
+                                    if not line or line == 'data: [DONE]':
+                                        continue
+                                    
+                                    if line.startswith('data: '):
+                                        try:
+                                            chunk = json.loads(line[6:])
+                                            if 'choices' in chunk and len(chunk['choices']) > 0:
+                                                delta = chunk['choices'][0].get('delta', {})
+                                                content = delta.get('content')
+                                                reasoning_content = delta.get('reasoning_content')
+                                                
+                                                if content or reasoning_content:
+                                                    if token_count == 0:
+                                                        first_token_time = time.perf_counter()
+                                                        e2e_ttft = first_token_time - start_time
+                                                        ttft = e2e_ttft-latency
+                                                        if ttft < 0:
+                                                            ttft = 0
+                                                    
+                                                    token_count += 1
+                                        except json.JSONDecodeError:
+                                            continue
+                            
+                            end_time = time.perf_counter()
+                            
+                            if token_count > 0:
+                                # Calculate decode time (time for subsequent tokens)
+                                # If only 1 token, decode_time is effectively 0, so we can't calculate inter-token speed
+                                if token_count > 1:
+                                    decode_time = end_time - first_token_time
+                                    if decode_time > 0:
+                                        # Speed for the generated tokens (excluding the first one which is TTFT)
+                                        tg_speeds.append((token_count - 1) / decode_time)
+                                    else:
+                                        # Fallback if time is too small
+                                        tg_speeds.append((token_count - 1) / 0.0001)
+                                
+                                if ttft > 0:
+                                    # Use total prompt tokens (pp + depth) for speed calculation
+                                    # as the server processes the full context (especially with no-cache).
+                                    total_prompt_tokens = pp + depth
+                                    pp_speeds.append(total_prompt_tokens / ttft)
+                                    ttft_values.append(ttft)
+
+                                if e2e_ttft > 0:
+                                    e2e_ttft_values.append(e2e_ttft)
+
+                        except Exception as e:
+                            print(f"Error during run: {e}")
+                            continue
+                        
+                        if args.post_run_cmd:
+                            try:
+                                subprocess.run(args.post_run_cmd, shell=True, check=True)
+                            except subprocess.CalledProcessError as e:
+                                print(f"Post-run command failed: {e}")
+
+                    # Aggregate results
+                    if pp_speeds:
+                        pp_mean = np.mean(pp_speeds)
+                        pp_std = np.std(pp_speeds)
+                        
+                        ttft_str = ""
+                        if ttft_values:
+                            ttft_mean = np.mean(ttft_values) * 1000
+                            ttft_std = np.std(ttft_values) * 1000
+                            ttft_str = f"{ttft_mean:.2f} ± {ttft_std:.2f}"
+
+                        e2e_ttft_str = ""
+                        if e2e_ttft_values:
+                            e2e_ttft_mean = np.mean(e2e_ttft_values) * 1000
+                            e2e_ttft_std = np.std(e2e_ttft_values) * 1000
+                            e2e_ttft_str = f"{e2e_ttft_mean:.2f} ± {e2e_ttft_std:.2f}"
+
+                        test_name = f"pp{pp}"
+                        if depth > 0:
+                            test_name += f" @ d{depth}"
+                        results.append([args.model, test_name, f"{pp_mean:.2f} ± {pp_std:.2f}", ttft_str, e2e_ttft_str])
                     
-                    ttft_str = ""
-                    if ttft_values:
-                        ttft_mean = np.mean(ttft_values) * 1000
-                        ttft_std = np.std(ttft_values) * 1000
-                        ttft_str = f"{ttft_mean:.2f} ± {ttft_std:.2f}"
+                    if tg_speeds:
+                        tg_mean = np.mean(tg_speeds)
+                        tg_std = np.std(tg_speeds)
+                        test_name = f"tg{tg}"
+                        if depth > 0:
+                            test_name += f" @ d{depth}"
+                        results.append([args.model, test_name, f"{tg_mean:.2f} ± {tg_std:.2f}", "", ""])
 
-                    e2e_ttft_str = ""
-                    if e2e_ttft_values:
-                        e2e_ttft_mean = np.mean(e2e_ttft_values) * 1000
-                        e2e_ttft_std = np.std(e2e_ttft_values) * 1000
-                        e2e_ttft_str = f"{e2e_ttft_mean:.2f} ± {e2e_ttft_std:.2f}"
-
-                    test_name = f"pp{pp}"
-                    if depth > 0:
-                        test_name += f" @ d{depth}"
-                    results.append([args.model, test_name, f"{pp_mean:.2f} ± {pp_std:.2f}", ttft_str, e2e_ttft_str])
-                
-                if tg_speeds:
-                    tg_mean = np.mean(tg_speeds)
-                    tg_std = np.std(tg_speeds)
-                    test_name = f"tg{tg}"
-                    if depth > 0:
-                        test_name += f" @ d{depth}"
-                    results.append([args.model, test_name, f"{tg_mean:.2f} ± {tg_std:.2f}", "", ""])
-
-    if not results:
-        print("No results collected. Check if the model is generating tokens.")
-    else:
-        print(tabulate(results, headers=["model", "test", "t/s", "ttft (ms)", "e2e_ttft (ms)"], tablefmt="pipe", colalign=("left", "right", "right", "right", "right")))
+        if not results:
+            print("No results collected. Check if the model is generating tokens.")
+        else:
+            print(tabulate(results, headers=["model", "test", "t/s", "ttft (ms)", "e2e_ttft (ms)"], tablefmt="pipe", colalign=("left", "right", "right", "right", "right")))
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

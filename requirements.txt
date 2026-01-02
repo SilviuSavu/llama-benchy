@@ -3,3 +3,5 @@ transformers
 tabulate
 numpy
 requests
+asyncio
+aiohttp
