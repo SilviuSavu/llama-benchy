@@ -1,8 +1,5 @@
 import argparse
 import os
-# Disable tokenizers parallelism to avoid warnings/errors when forking
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["OMP_NUM_THREADS"] = "1"
 import time
 import uuid
 import subprocess
