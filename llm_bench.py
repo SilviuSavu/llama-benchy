@@ -128,17 +128,23 @@ async def measure_latency(session, base_url, api_key, mode="api", model_name=Non
             if mode == "api":
                 async with session.get(f"{base_url}/models", headers=headers) as response:
                     await response.read()
+                latencies.append(time.perf_counter() - start)
             elif mode == "generation":
                 if not model_name:
                     raise ValueError("Model name required for generation latency mode")
                 payload = {
                     "model": model_name,
                     "messages": [{"role": "user", "content": "hello"}],
-                    "max_tokens": 1
+                    "max_tokens": 1,
+                    "stream": True
                 }
                 async with session.post(f"{base_url}/chat/completions", json=payload, headers=headers) as response:
-                    await response.read()
-            latencies.append(time.perf_counter() - start)
+                    async for _ in response.content:
+                        # record latency as soon as the first byte is received
+                        latencies.append(time.perf_counter() - start)
+                        break
+                    # Drain the rest of the response to keep the connection alive
+                    async for _ in response.content: pass
         except Exception as e:
             print(f"Error measuring latency: {e}")
     
