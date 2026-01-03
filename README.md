@@ -57,6 +57,27 @@ python llm_bench.py \
   --latency-mode generation
 ```
 
+Output:
+
+
+| model               |            test |             t/s |          ttfr (ms) |       est_ppt (ms) |      e2e_ttft (ms) |
+|:--------------------|----------------:|----------------:|-------------------:|-------------------:|-------------------:|
+| openai/gpt-oss-120b |          pp2048 | 2019.02 ± 34.98 |    1054.64 ± 17.57 |    1014.66 ± 17.57 |    1115.41 ± 18.70 |
+| openai/gpt-oss-120b |            tg32 |    52.94 ± 1.01 |                    |                    |                    |
+| openai/gpt-oss-120b |  pp2048 @ d4096 | 1994.49 ± 77.97 |   3129.18 ± 120.27 |   3089.19 ± 120.27 |   3198.97 ± 122.24 |
+| openai/gpt-oss-120b |    tg32 @ d4096 |    46.69 ± 1.11 |                    |                    |                    |
+| openai/gpt-oss-120b |  pp2048 @ d8192 | 1751.68 ± 34.44 |   5892.61 ± 114.68 |   5852.63 ± 114.68 |   5971.27 ± 115.77 |
+| openai/gpt-oss-120b |    tg32 @ d8192 |    40.40 ± 1.19 |                    |                    |                    |
+| openai/gpt-oss-120b | pp2048 @ d16384 | 1475.63 ± 31.41 |  12542.02 ± 265.86 |  12502.04 ± 265.86 |  12634.67 ± 269.43 |
+| openai/gpt-oss-120b |   tg32 @ d16384 |    33.86 ± 1.45 |                    |                    |                    |
+| openai/gpt-oss-120b | pp2048 @ d32768 | 1131.86 ± 50.53 | 30869.90 ± 1410.15 | 30829.92 ± 1410.15 | 30992.96 ± 1417.33 |
+| openai/gpt-oss-120b |   tg32 @ d32768 |    25.34 ± 1.31 |                    |                    |                    |
+
+llama-bench-4all (build: 75bc129)
+date: 2026-01-02 17:11:19 | latency mode: generation
+
+-------
+
 It's recommended to use "generation" latency mode to get prompt processing speeds closer to real numbers, especially on shorter prompts.
 `--adapt-prompt` will ensure the prompt tokens match the specified value, regardless of the chat template applied.
 
@@ -115,7 +136,7 @@ The script attempts to estimate network or processing latency to provide "server
 ```bash
 python llm_bench.py \
   --base-url http://localhost:8000/v1 \
-  --model meta-llama/Llama-2-7b-chat-hf \
+  --model openai/gpt-oss-120b \
   --pp 128 256 \
   --tg 32 64 \
   --depth 0 1024
