@@ -159,28 +159,55 @@ async def warmup(session, base_url, api_key, model, tokenizer=None):
     print("Warming up...")
     headers = {"Authorization": f"Bearer {api_key}"}
     warmup_text = "Warmup " * 10
-    payload = {
+    
+    delta_user = 0
+    delta_context = 0
+    
+    # 1. User only (No Context)
+    payload_user = {
         "model": model,
         "messages": [{"role": "user", "content": warmup_text}],
         "max_tokens": 1
     }
-    token_usage_delta = 0
+    
     try:
-        async with session.post(f"{base_url}/chat/completions", json=payload, headers=headers) as response:
+        async with session.post(f"{base_url}/chat/completions", json=payload_user, headers=headers) as response:
             response_json = await response.json()
             if tokenizer:
                 if 'usage' in response_json:
                     prompt_tokens = response_json['usage']['prompt_tokens']
                     local_tokens = len(tokenizer.encode(warmup_text, add_special_tokens=False))
-                    token_usage_delta = prompt_tokens - local_tokens
-                    print(f"Warmup complete. Delta: {token_usage_delta} tokens (Server: {prompt_tokens}, Local: {local_tokens})")
+                    delta_user = prompt_tokens - local_tokens
+                    print(f"Warmup (User only) complete. Delta: {delta_user} tokens (Server: {prompt_tokens}, Local: {local_tokens})")
                 else:
-                    print("Warmup complete (no usage stats found).")
+                    print("Warmup (User only) complete (no usage stats found).")
             else:
                 print("Warmup complete.")
+
+        if tokenizer:
+            # 2. System + Empty User (Context Only)
+            payload_sys_empty = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": warmup_text},
+                    {"role": "user", "content": ""}
+                ],
+                "max_tokens": 1
+            }
+            async with session.post(f"{base_url}/chat/completions", json=payload_sys_empty, headers=headers) as response:
+                response_json = await response.json()
+                if 'usage' in response_json:
+                    prompt_tokens = response_json['usage']['prompt_tokens']
+                    local_tokens = len(tokenizer.encode(warmup_text, add_special_tokens=False))
+                    delta_context = prompt_tokens - local_tokens
+                    print(f"Warmup (System+Empty) complete. Delta: {delta_context} tokens (Server: {prompt_tokens}, Local: {local_tokens})")
+                else:
+                    print("Warmup (System+Empty) complete (no usage stats found).")
+                    delta_context = delta_user
+
     except Exception as e:
         print(f"Warmup failed: {e}")
-    return token_usage_delta
+    return delta_user, delta_context
 
 async def run_benchmark(session, base_url, api_key, model_name, context_text, prompt_text, expected_pp_tokens, tg, no_cache, latency, post_run_cmd):
     messages = []
@@ -347,13 +374,14 @@ async def main():
     timeout = aiohttp.ClientTimeout(total=3600)
     connector = aiohttp.TCPConnector(limit=1, force_close=False, keepalive_timeout=600)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector, trust_env=True) as session:
-        token_usage_delta = 0
+        delta_user = 0
+        delta_context = 0
         should_warmup = not args.no_warmup
         if args.adapt_prompt:
             should_warmup = True
             
         if should_warmup:
-            token_usage_delta = await warmup(session, args.base_url, args.api_key, served_model_name, tokenizer if args.adapt_prompt else None)
+            delta_user, delta_context = await warmup(session, args.base_url, args.api_key, served_model_name, tokenizer if args.adapt_prompt else None)
 
         latency = await measure_latency(session, args.base_url, args.api_key, args.latency_mode, served_model_name)
         
@@ -372,15 +400,18 @@ async def main():
                     
                     ctx_pp_speeds = []
                     ctx_tg_speeds = []
+                    ctx_ttfr_values = []
+                    ctx_est_ppt_values = []
+                    ctx_e2e_ttft_values = []
                     
                     for run in range(args.runs):
                         current_pp = pp
                         current_depth = depth
                         if args.adapt_prompt:
                             if depth == 0:
-                                current_pp = max(1, pp - token_usage_delta)
+                                current_pp = max(1, pp - delta_user)
                             else:
-                                current_depth = max(1, depth - token_usage_delta)
+                                current_depth = max(1, depth - delta_context)
                         print(f"current_pp={current_pp}, current_depth={current_depth}")
                         context, prompt = generate_prompt(all_tokens, tokenizer, current_pp, current_depth, args.no_cache)
                         
@@ -397,6 +428,12 @@ async def main():
                                     ctx_pp_speeds.append(ctx_result["pp_speed"])
                                 if ctx_result["tg_speed"] is not None:
                                     ctx_tg_speeds.append(ctx_result["tg_speed"])
+                                if ctx_result["ttfr"] is not None:
+                                    ctx_ttfr_values.append(ctx_result["ttfr"])
+                                if ctx_result["est_ppt"] is not None:
+                                    ctx_est_ppt_values.append(ctx_result["est_ppt"])
+                                if ctx_result["e2e_ttft"] is not None:
+                                    ctx_e2e_ttft_values.append(ctx_result["e2e_ttft"])
                             
                             # Request 2: Context + Prompt
                             # We send context as system message, and prompt as user message.
@@ -434,7 +471,14 @@ async def main():
                     # Context PP (if enabled)
                     if ctx_pp_speeds:
                         test_name = f"ctx_pp @ d{depth}"
-                        results.append([args.model, test_name, format_result(ctx_pp_speeds), "", "", ""])
+                        results.append([
+                            args.model, 
+                            test_name, 
+                            format_result(ctx_pp_speeds), 
+                            format_result(ctx_ttfr_values, 1000), 
+                            format_result(ctx_est_ppt_values, 1000), 
+                            format_result(ctx_e2e_ttft_values, 1000)
+                        ])
 
                     # Context TG (if enabled)
                     if ctx_tg_speeds:
