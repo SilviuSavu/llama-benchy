@@ -37,6 +37,7 @@ def parse_arguments():
     parser.add_argument("--latency-mode", type=str, default="api", choices=["api", "generation", "none"], help="Method to measure latency: 'api' (list models) - default, 'generation' (single token generation), or 'none' (skip latency measurement)")
     parser.add_argument("--no-warmup", action="store_true", help="Skip warmup phase")
     parser.add_argument("--adapt-prompt", action="store_true", help="Adapt prompt size based on warmup token usage delta")
+    parser.add_argument("--enable-prefix-caching", action="store_true", help="Enable prefix caching performance measurement")
     return parser.parse_args()
 
 def get_tokenizer(model_name, tokenizer_name=None):
@@ -181,15 +182,11 @@ async def warmup(session, base_url, api_key, model, tokenizer=None):
         print(f"Warmup failed: {e}")
     return token_usage_delta
 
-async def run_benchmark(session, base_url, api_key, model_name, tokenizer, all_tokens, pp, tg, depth, no_cache, adapt_prompt, token_usage_delta, latency, post_run_cmd):
-    current_pp = pp
-    if adapt_prompt:
-        current_pp = max(1, pp - token_usage_delta)
-    context, prompt = generate_prompt(all_tokens, tokenizer, current_pp, depth, no_cache)
+async def run_benchmark(session, base_url, api_key, model_name, context_text, prompt_text, expected_pp_tokens, tg, no_cache, latency, post_run_cmd):
     messages = []
-    if context:
-        messages.append({"role": "system", "content": context})
-    messages.append({"role": "user", "content": prompt})
+    if context_text:
+        messages.append({"role": "system", "content": context_text})
+    messages.append({"role": "user", "content": prompt_text})
     
     ttft = 0
     e2e_ttft = 0
@@ -284,13 +281,15 @@ async def run_benchmark(session, base_url, api_key, model_name, tokenizer, all_t
                     # Fallback if time is too small
                     result["tg_speed"] = (token_count - 1) / 0.0001
             
-            # Use total prompt tokens (pp + depth) for speed calculation
-            # as the server processes the full context (especially with no-cache).
-            total_prompt_tokens = 0
-            if prompt_usage_tokens > 0 and prompt_usage_tokens > (pp + depth):
-                total_prompt_tokens = prompt_usage_tokens
-            else: 
-                total_prompt_tokens = pp + depth
+            # Use expected_pp_tokens for speed calculation
+            total_prompt_tokens = expected_pp_tokens
+            
+            # Only use reported usage if it's close to expected (to handle tokenizer differences)
+            # but not if it's vastly different (which happens in prefix caching where usage includes cached tokens)
+            if prompt_usage_tokens > 0:
+                diff = abs(prompt_usage_tokens - expected_pp_tokens)
+                if diff < expected_pp_tokens * 0.2: # 20% tolerance
+                     total_prompt_tokens = prompt_usage_tokens
 
             # Calculate TTFR and Estimated Prompt Processing Time
             ttfr = 0
@@ -327,6 +326,11 @@ async def run_benchmark(session, base_url, api_key, model_name, tokenizer, all_t
 
 async def main():
     args = parse_arguments()
+    
+    if args.enable_prefix_caching and args.no_cache:
+        print("Error: --enable-prefix-caching and --no-cache are incompatible.")
+        return
+
     build_number = get_git_revision_short_hash()
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"llama-bench-4all (build: {build_number})")
@@ -366,8 +370,41 @@ async def main():
                     est_ppt_values = []
                     e2e_ttft_values = []
                     
+                    ctx_pp_speeds = []
+                    ctx_tg_speeds = []
+                    
                     for run in range(args.runs):
-                        run_result = await run_benchmark(session, args.base_url, args.api_key, served_model_name, tokenizer, all_tokens, pp, tg, depth, args.no_cache, args.adapt_prompt, token_usage_delta, latency, args.post_run_cmd)
+                        current_pp = pp
+                        if args.adapt_prompt:
+                            current_pp = max(1, pp - token_usage_delta)
+                        
+                        context, prompt = generate_prompt(all_tokens, tokenizer, current_pp, depth, args.no_cache)
+                        
+                        if args.enable_prefix_caching and depth > 0:
+                            # Request 1: Context only
+                            # We send context as system message, and empty prompt as user message.
+                            # This establishes the prefix: [System: Context] [User: ""]
+                            # Expected PP tokens = depth (context size)
+                            print(f"  Run {run+1}/{args.runs} (Context Load)...")
+                            ctx_result = await run_benchmark(session, args.base_url, args.api_key, served_model_name, context, "", depth, tg, args.no_cache, latency, None)
+                            
+                            if ctx_result:
+                                if ctx_result["pp_speed"] is not None:
+                                    ctx_pp_speeds.append(ctx_result["pp_speed"])
+                                if ctx_result["tg_speed"] is not None:
+                                    ctx_tg_speeds.append(ctx_result["tg_speed"])
+                            
+                            # Request 2: Context + Prompt
+                            # We send context as system message, and prompt as user message.
+                            # The prefix [System: Context] should be cached.
+                            # Expected PP tokens = current_pp (prompt size only)
+                            print(f"  Run {run+1}/{args.runs} (Inference)...")
+                            run_result = await run_benchmark(session, args.base_url, args.api_key, served_model_name, context, prompt, current_pp, tg, args.no_cache, latency, args.post_run_cmd)
+                        else:
+                            # Standard run
+                            # Expected PP tokens = current_pp + depth
+                            expected_tokens = current_pp + depth
+                            run_result = await run_benchmark(session, args.base_url, args.api_key, served_model_name, context, prompt, expected_tokens, tg, args.no_cache, latency, args.post_run_cmd)
                         
                         if run_result:
                             if run_result["tg_speed"] is not None:
@@ -384,40 +421,40 @@ async def main():
                                 e2e_ttft_values.append(run_result["e2e_ttft"])
 
                     # Aggregate results
+                    def format_result(values, multiplier=1.0):
+                        if not values: return ""
+                        mean = np.mean(values) * multiplier
+                        std = np.std(values) * multiplier
+                        return f"{mean:.2f} ± {std:.2f}"
+
+                    # Standard PP
                     if pp_speeds:
-                        pp_mean = np.mean(pp_speeds)
-                        pp_std = np.std(pp_speeds)
-                        
-                        ttfr_str = ""
-                        if ttfr_values:
-                            ttfr_mean = np.mean(ttfr_values) * 1000
-                            ttfr_std = np.std(ttfr_values) * 1000
-                            ttfr_str = f"{ttfr_mean:.2f} ± {ttfr_std:.2f}"
-
-                        est_ppt_str = ""
-                        if est_ppt_values:
-                            est_ppt_mean = np.mean(est_ppt_values) * 1000
-                            est_ppt_std = np.std(est_ppt_values) * 1000
-                            est_ppt_str = f"{est_ppt_mean:.2f} ± {est_ppt_std:.2f}"
-
-                        e2e_ttft_str = ""
-                        if e2e_ttft_values:
-                            e2e_ttft_mean = np.mean(e2e_ttft_values) * 1000
-                            e2e_ttft_std = np.std(e2e_ttft_values) * 1000
-                            e2e_ttft_str = f"{e2e_ttft_mean:.2f} ± {e2e_ttft_std:.2f}"
-
                         test_name = f"pp{pp}"
-                        if depth > 0:
-                            test_name += f" @ d{depth}"
-                        results.append([args.model, test_name, f"{pp_mean:.2f} ± {pp_std:.2f}", ttfr_str, est_ppt_str, e2e_ttft_str])
+                        if depth > 0: test_name += f" @ d{depth}"
+                        results.append([
+                            args.model, 
+                            test_name, 
+                            format_result(pp_speeds), 
+                            format_result(ttfr_values, 1000), 
+                            format_result(est_ppt_values, 1000), 
+                            format_result(e2e_ttft_values, 1000)
+                        ])
                     
+                    # Standard TG
                     if tg_speeds:
-                        tg_mean = np.mean(tg_speeds)
-                        tg_std = np.std(tg_speeds)
                         test_name = f"tg{tg}"
-                        if depth > 0:
-                            test_name += f" @ d{depth}"
-                        results.append([args.model, test_name, f"{tg_mean:.2f} ± {tg_std:.2f}", "", "", ""])
+                        if depth > 0: test_name += f" @ d{depth}"
+                        results.append([args.model, test_name, format_result(tg_speeds), "", "", ""])
+
+                    # Context PP (if enabled)
+                    if ctx_pp_speeds:
+                        test_name = f"ctx_pp @ d{depth}"
+                        results.append([args.model, test_name, format_result(ctx_pp_speeds), "", "", ""])
+
+                    # Context TG (if enabled)
+                    if ctx_tg_speeds:
+                        test_name = f"ctx_tg @ d{depth}"
+                        results.append([args.model, test_name, format_result(ctx_tg_speeds), "", "", ""])
 
         print()
         if not results:
