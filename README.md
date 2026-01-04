@@ -100,6 +100,7 @@ Generally you don't need to disable prompt caching on the server, as a probabili
 -   `--latency-mode`: Method to measure latency: 'models' (list models) - default, 'generation' (single token generation), or 'none' (skip latency measurement).
 -   `--no-warmup`: Skip warmup phase.
 -   `--adapt-prompt`: Adapt prompt size based on warmup token usage delta.
+-   `--enable-prefix-caching`: Enable prefix caching performance measurement. When enabled (and depth > 0), it performs a two-step benchmark: first loading the context (reported as `ctx_pp`), then running the prompt with the cached context.
 
 ### Metrics
 
@@ -130,6 +131,17 @@ The script attempts to estimate network or processing latency to provide "server
 -   **`e2e_ttft (ms)` (End-to-End Time To First Token)**:
     -   Calculation: `Time of First Content Token - Start Time`.
     -   The total time perceived by the client from sending the request to seeing the first generated content.
+
+### Prefix Caching Benchmarking
+
+When `--enable-prefix-caching` is used (with `--depth` > 0), the script performs a two-step process for each run to measure the impact of prefix caching:
+
+1.  **Context Load**: Sends the context tokens (as a system message) with an empty user message. This forces the server to process and cache the context.
+    -   Reported as `ctx_pp @ d{depth}` (Context Prompt Processing) and `ctx_tg @ d{depth}`.
+2.  **Inference**: Sends the same context (system message) followed by the actual prompt (user message). The server should reuse the cached context.
+    -   Reported as standard `pp{tokens} @ d{depth}` and `tg{tokens} @ d{depth}`.
+
+By comparing the `pp` speed of the Inference step with a non-cached run (or the Context Load step), you can observe the speedup provided by prefix caching.
 
 ### Example
 
