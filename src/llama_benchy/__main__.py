@@ -18,12 +18,9 @@ import hashlib
 from transformers import AutoTokenizer
 import requests
 
+# Build number is now imported from __init__.py
+from . import __build__, __version__
 
-def get_git_revision_short_hash():
-    try:
-        return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
-    except Exception:
-        return "unknown"
 
 
 def parse_arguments():
@@ -372,9 +369,11 @@ async def main_async():
         print("Error: --enable-prefix-caching and --no-cache are incompatible.")
         return
 
-    build_number = get_git_revision_short_hash()
+    build_number = __build__
+    version_number = __version__
+
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"llama-benchy (build: {build_number})")
+    print(f"llama-benchy ({version_number}.{build_number})")
     print(f"Date: {current_time}")
     print(f"Benchmarking model: {args.model} at {args.base_url}")
     
@@ -523,7 +522,7 @@ async def main_async():
             print("No results collected. Check if the model is generating tokens.")
         else:
             print(tabulate(results, headers=["model", "test", "t/s", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"], tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right")))
-            print(f"\nllama-benchy (build: {build_number})")
+            print(f"\nllama-benchy ({version_number}.{build_number})")
             print(f"date: {current_time} | latency mode: {args.latency_mode}")
 
 
