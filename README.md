@@ -31,26 +31,38 @@ As of January 2nd, 2026, I wasn't able to find any existing benchmarking tool th
 
 ## Installation
 
-1.  Create a virtual environment:
-    ```bash
-    uv venv .venv
-    source .venv/bin/activate
-    ```
-2.  Install dependencies:
-    ```bash
-    uv pip install -r requirements.txt
-    ```
+### Option 1: Install from source
+
+```bash
+# Clone the repository
+git clone https://github.com/user/llama-benchy.git
+cd llama-benchy
+
+# Install with uv (creates a virtual environment automatically)
+uv pip install -e .
+```
+
+### Option 2: Run without installing
+
+```bash
+# Using uv run (no installation required)
+uv run llama-benchy --base-url <ENDPOINT_URL> --model <MODEL_NAME>
+```
+
+Note: `uvx` doesn't work directly with local packages, so you'll need to install the package first or use `uv run`.
 
 ## Usage
 
+After installation, you can run the tool directly:
+
 ```bash
-python llama-benchy.py --base-url <ENDPOINT_URL> --model <MODEL_NAME> --pp <PROMPT_TOKENS> --tg <GEN_TOKENS> [OPTIONS]
+llama-benchy --base-url <ENDPOINT_URL> --model <MODEL_NAME> --pp <PROMPT_TOKENS> --tg <GEN_TOKENS> [OPTIONS]
 ```
 
 Example:
 
 ```bash
-python llama-benchy.py \
+llama-benchy \
   --base-url http://localhost:8000/v1 \
   --model openai/gpt-oss-120b \
   --depth 0 4096 8192 16384 32768 \
@@ -147,7 +159,7 @@ By comparing the `pp` speed of the Inference step with a non-cached run (or the 
 ### Example
 
 ```bash
-python llama-benchy.py \
+llama-benchy \
   --base-url http://localhost:8000/v1 \
   --model openai/gpt-oss-120b \
   --pp 128 256 \

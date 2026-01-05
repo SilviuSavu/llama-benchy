@@ -1,3 +1,7 @@
+"""
+Main entry point for the llama-benchy CLI.
+"""
+
 import argparse
 import os
 import time
@@ -14,11 +18,13 @@ import hashlib
 from transformers import AutoTokenizer
 import requests
 
+
 def get_git_revision_short_hash():
     try:
         return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
     except Exception:
         return "unknown"
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="LLM Benchmark Script")
@@ -41,6 +47,7 @@ def parse_arguments():
     parser.add_argument("--enable-prefix-caching", action="store_true", help="Enable prefix caching performance measurement")
     return parser.parse_args()
 
+
 def get_tokenizer(model_name, tokenizer_name=None):
     try:
         name = tokenizer_name if tokenizer_name else model_name
@@ -49,6 +56,7 @@ def get_tokenizer(model_name, tokenizer_name=None):
         print(f"Error loading tokenizer: {e}")
         print("Falling back to 'gpt2' tokenizer as approximation.")
         return AutoTokenizer.from_pretrained("gpt2")
+
 
 def prepare_text_data(book_url, tokenizer):
     try:
@@ -84,6 +92,7 @@ def prepare_text_data(book_url, tokenizer):
         print(f"Error downloading book: {e}")
         exit(1)
 
+
 def generate_prompt(all_tokens, tokenizer, prompt_tokens, context_tokens=0, no_cache=False):
     suffix = ""
     suffix_len = 0
@@ -114,6 +123,7 @@ def generate_prompt(all_tokens, tokenizer, prompt_tokens, context_tokens=0, no_c
         prompt_text += suffix
         
     return context_text, prompt_text
+
 
 async def measure_latency(session, base_url, api_key, mode="api", model_name=None):
     if mode == "none":
@@ -155,6 +165,7 @@ async def measure_latency(session, base_url, api_key, mode="api", model_name=Non
         print(f"Average latency ({mode}): {avg_latency*1000:.2f} ms")
         return avg_latency
     return 0
+
 
 async def warmup(session, base_url, api_key, model, tokenizer=None):
     print("Warming up...")
@@ -209,6 +220,7 @@ async def warmup(session, base_url, api_key, model, tokenizer=None):
     except Exception as e:
         print(f"Warmup failed: {e}")
     return delta_user, delta_context
+
 
 async def run_benchmark(session, base_url, api_key, model_name, context_text, prompt_text, expected_pp_tokens, tg, no_cache, latency, post_run_cmd):
     messages = []
@@ -352,7 +364,8 @@ async def run_benchmark(session, base_url, api_key, model_name, context_text, pr
 
     return result
 
-async def main():
+
+async def main_async():
     args = parse_arguments()
     
     if args.enable_prefix_caching and args.no_cache:
@@ -513,5 +526,11 @@ async def main():
             print(f"\nllama-benchy (build: {build_number})")
             print(f"date: {current_time} | latency mode: {args.latency_mode}")
 
+
+def main():
+    """Entry point for the CLI command."""
+    asyncio.run(main_async())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
