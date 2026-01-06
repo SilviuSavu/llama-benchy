@@ -31,9 +31,17 @@ As of January 2nd, 2026, I wasn't able to find any existing benchmarking tool th
 
 ## Installation
 
-Install `uv` first: https://docs.astral.sh/uv/getting-started/installation/
+Using `uv` is recommended. You can install `uv` here: https://docs.astral.sh/uv/getting-started/installation/
 
 ### Option 1: Run without installation using `uvx`
+
+Run the release version from PyPI:
+
+```bash
+uvx llama-benchy --base-url <ENDPOINT_URL> --model <MODEL_NAME>
+```
+
+Run the latest version from the main branch:
 
 ```bash
 uvx --from git+https://github.com/eugr/llama-benchy llama-benchy --base-url <ENDPOINT_URL> --model <MODEL_NAME>
@@ -78,6 +86,14 @@ uv run llama-benchy --base-url <ENDPOINT_URL> --model <MODEL_NAME>
 ```
 
 ### Option 3: Install into system path
+
+Release version from PyPI:
+
+```bash
+uv pip install -U llama-benchy
+```
+
+Current version from the main branch:
 
 ```bash
 uv pip install git+https://github.com/eugr/llama-benchy --system
