@@ -241,6 +241,9 @@ async def run_benchmark(session, base_url, api_key, model_name, context_text, pr
         "est_ppt": None,
         "e2e_ttft": None
     }
+    
+    # DEBUG: Buffer to store first few lines of raw response
+    debug_lines = []
 
     try:
         payload = {
@@ -276,12 +279,22 @@ async def run_benchmark(session, base_url, api_key, model_name, context_text, pr
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
                     line = line.strip()
-                    if not line or line == 'data: [DONE]':
+                    if not line:
+                        continue
+                        
+                    # Capture first 5 lines for debugging if needed
+                    if len(debug_lines) < 5:
+                        debug_lines.append(line)
+
+                    if line == 'data: [DONE]' or line == 'data:[DONE]':
                         continue
                     
-                    if line.startswith('data: '):
+                    if line.startswith('data:'):
                         try:
-                            chunk = json.loads(line[6:])
+                            # Strip 'data:' and potential whitespace
+                            json_str = line[5:].strip()
+                            chunk = json.loads(json_str)
+
                             if 'usage' in chunk:
                                 prompt_usage_tokens = chunk['usage'].get('prompt_tokens', 0)
                             
@@ -292,8 +305,9 @@ async def run_benchmark(session, base_url, api_key, model_name, context_text, pr
                                 delta = chunk['choices'][0].get('delta', {})
                                 content = delta.get('content')
                                 reasoning_content = delta.get('reasoning_content')
+                                reasoning = delta.get('reasoning')
                                 
-                                if content or reasoning_content:
+                                if content or reasoning_content or reasoning:
                                     if token_count == 0:
                                         first_token_time = chunk_time
                                         e2e_ttft = first_token_time - start_time
@@ -306,6 +320,10 @@ async def run_benchmark(session, base_url, api_key, model_name, context_text, pr
                             continue
         
         end_time = time.perf_counter()
+        
+        # DEBUG: Print warning if no tokens were collected
+        if token_count == 0:
+            print(f"\n[Warning] Run generated 0 tokens. Raw response sample: {debug_lines}")
         
         if token_count > 0:
             # Calculate decode time (time for subsequent tokens)
