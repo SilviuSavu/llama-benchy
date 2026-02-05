@@ -3,8 +3,8 @@
 venv/
 env/
 
-# GitHub workflows
-.github/
+# Copilot instructions
+.github/copilot-instructions.md
 
 # Python package artifacts
 __pycache__/
