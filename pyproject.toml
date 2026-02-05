@@ -32,6 +32,15 @@ dependencies = [
     "aiohttp",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+]
+
 [project.scripts]
 llama-benchy = "llama_benchy.__main__:main"
 
