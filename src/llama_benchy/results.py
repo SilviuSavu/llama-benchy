@@ -6,14 +6,19 @@ from dataclasses import dataclass
 from .client import RequestResult
 
 @dataclass
+class BenchmarkMetric:
+    mean: float
+    std: float
+
+@dataclass
 class BenchmarkResultEntry:
     model: str
     test_name: str
-    t_s: str
-    t_s_req: str
-    ttfr: str
-    est_ppt: str
-    e2e_ttft: str
+    t_s: Optional[BenchmarkMetric]
+    t_s_req: Optional[BenchmarkMetric]
+    ttfr: Optional[BenchmarkMetric]
+    est_ppt: Optional[BenchmarkMetric]
+    e2e_ttft: Optional[BenchmarkMetric]
 
 class BenchmarkResults:
     def __init__(self):
@@ -178,30 +183,44 @@ class BenchmarkResults:
 
 
     def _create_entry(self, model, test_name, concurrency, speed_values, ttfr_values, est_ppt_values, e2e_ttft_values, per_req_speeds: Optional[List[float]] = None):
-        def format_result(values, multiplier=1.0):
-            if not values: return ""
+        def calculate_metric(values, multiplier=1.0) -> Optional[BenchmarkMetric]:
+            if not values: return None
             mean = np.mean(values) * multiplier
             std = np.std(values) * multiplier
-            return f"{mean:.2f} ± {std:.2f}"
+            return BenchmarkMetric(mean=mean, std=std)
 
-        t_s_str = format_result(speed_values)
-        t_s_req_str = ""
+        t_s_metric = calculate_metric(speed_values)
+        t_s_req_metric = None
         
         if per_req_speeds and concurrency > 1:
-            t_s_req_str = format_result(per_req_speeds)
+            t_s_req_metric = calculate_metric(per_req_speeds)
 
         self.entries.append(BenchmarkResultEntry(
             model=model,
             test_name=test_name,
-            t_s=t_s_str,
-            t_s_req=t_s_req_str,
-            ttfr=format_result(ttfr_values, 1000),
-            est_ppt=format_result(est_ppt_values, 1000),
-            e2e_ttft=format_result(e2e_ttft_values, 1000)
+            t_s=t_s_metric,
+            t_s_req=t_s_req_metric,
+            ttfr=calculate_metric(ttfr_values, 1000),
+            est_ppt=calculate_metric(est_ppt_values, 1000),
+            e2e_ttft=calculate_metric(e2e_ttft_values, 1000)
         ))
 
     def print_report(self, concurrency: int = 1):
-        data = [[e.model, e.test_name, e.t_s, e.t_s_req, e.ttfr, e.est_ppt, e.e2e_ttft] for e in self.entries]
+        def fmt(metric: Optional[BenchmarkMetric]) -> str:
+            if metric is None:
+                return ""
+            return f"{metric.mean:.2f} ± {metric.std:.2f}"
+
+        data = [[
+            e.model, 
+            e.test_name, 
+            fmt(e.t_s), 
+            fmt(e.t_s_req), 
+            fmt(e.ttfr), 
+            fmt(e.est_ppt), 
+            fmt(e.e2e_ttft)
+        ] for e in self.entries]
+        
         print()
         if not data:
             print("No results collected. Check if the model is generating tokens.")
@@ -213,7 +232,14 @@ class BenchmarkResults:
             # Usually if concurrency=1, t/s (req) is identical to t/s total.
             # Let's hide it if concurrency == 1 to keep table clean.
             if concurrency == 1:
-                 data = [[e.model, e.test_name, e.t_s, e.ttfr, e.est_ppt, e.e2e_ttft] for e in self.entries]
+                 data = [[
+                     e.model, 
+                     e.test_name, 
+                     fmt(e.t_s), 
+                     fmt(e.ttfr), 
+                     fmt(e.est_ppt), 
+                     fmt(e.e2e_ttft)
+                 ] for e in self.entries]
                  headers = ["model", "test", ts_header, "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
 
             print(tabulate(data, headers=headers, tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right", "right")))
