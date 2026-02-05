@@ -10,6 +10,7 @@ class BenchmarkResultEntry:
     model: str
     test_name: str
     t_s: str
+    t_s_req: str
     ttfr: str
     est_ppt: str
     e2e_ttft: str
@@ -62,12 +63,12 @@ class BenchmarkResults:
              # Check if we have data
              has_data = len(agg_pp_speeds) > 0 or len(agg_batch_pp_throughputs) > 0
              if has_data:
-                 self._create_entry(model, test_name, concurrency, agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds, agg_ttfr_values, agg_est_ppt_values, agg_e2e_ttft_values)
+                 self._create_entry(model, test_name, concurrency, agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds, agg_ttfr_values, agg_est_ppt_values, agg_e2e_ttft_values, per_req_speeds=agg_pp_speeds if concurrency > 1 else None)
              
              test_name_tg = f"ctx_tg @ d{depth}"
              has_data_tg = len(agg_tg_speeds) > 0 or len(agg_batch_tg_throughputs) > 0
              if has_data_tg:
-                 self._create_entry(model, test_name_tg, concurrency, agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds, [], [], [])
+                 self._create_entry(model, test_name_tg, concurrency, agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds, [], [], [], per_req_speeds=agg_tg_speeds if concurrency > 1 else None)
 
         else:
             # Standard
@@ -76,14 +77,14 @@ class BenchmarkResults:
             
             has_data = len(agg_pp_speeds) > 0 or len(agg_batch_pp_throughputs) > 0
             if has_data:
-                self._create_entry(model, test_name, concurrency, agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds, agg_ttfr_values, agg_est_ppt_values, agg_e2e_ttft_values)
+                self._create_entry(model, test_name, concurrency, agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds, agg_ttfr_values, agg_est_ppt_values, agg_e2e_ttft_values, per_req_speeds=agg_pp_speeds if concurrency > 1 else None)
             
             test_name_tg = f"tg{tg}"
             if depth > 0: test_name_tg += f" @ d{depth}"
             
             has_data_tg = len(agg_tg_speeds) > 0 or len(agg_batch_tg_throughputs) > 0
             if has_data_tg:
-                self._create_entry(model, test_name_tg, concurrency, agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds, [], [], [])
+                self._create_entry(model, test_name_tg, concurrency, agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds, [], [], [], per_req_speeds=agg_tg_speeds if concurrency > 1 else None)
 
 
     def _process_batch(self, 
@@ -176,27 +177,43 @@ class BenchmarkResults:
                      agg_batch_tg_throughputs.append(batch_tg_throughput)
 
 
-    def _create_entry(self, model, test_name, concurrency, speed_values, ttfr_values, est_ppt_values, e2e_ttft_values):
+    def _create_entry(self, model, test_name, concurrency, speed_values, ttfr_values, est_ppt_values, e2e_ttft_values, per_req_speeds: Optional[List[float]] = None):
         def format_result(values, multiplier=1.0):
             if not values: return ""
             mean = np.mean(values) * multiplier
             std = np.std(values) * multiplier
             return f"{mean:.2f} ± {std:.2f}"
 
+        t_s_str = format_result(speed_values)
+        t_s_req_str = ""
+        
+        if per_req_speeds and concurrency > 1:
+            t_s_req_str = format_result(per_req_speeds)
+
         self.entries.append(BenchmarkResultEntry(
             model=model,
             test_name=test_name,
-            t_s=format_result(speed_values),
+            t_s=t_s_str,
+            t_s_req=t_s_req_str,
             ttfr=format_result(ttfr_values, 1000),
             est_ppt=format_result(est_ppt_values, 1000),
             e2e_ttft=format_result(e2e_ttft_values, 1000)
         ))
 
     def print_report(self, concurrency: int = 1):
-        data = [[e.model, e.test_name, e.t_s, e.ttfr, e.est_ppt, e.e2e_ttft] for e in self.entries]
+        data = [[e.model, e.test_name, e.t_s, e.t_s_req, e.ttfr, e.est_ppt, e.e2e_ttft] for e in self.entries]
         print()
         if not data:
             print("No results collected. Check if the model is generating tokens.")
         else:
             ts_header = "t/s (total)" if concurrency > 1 else "t/s"
-            print(tabulate(data, headers=["model", "test", ts_header, "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"], tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right")))
+            headers = ["model", "test", ts_header, "t/s (req)", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
+            
+            # If no concurrency, hide the redundant column if desired, OR keep for consistency.
+            # Usually if concurrency=1, t/s (req) is identical to t/s total.
+            # Let's hide it if concurrency == 1 to keep table clean.
+            if concurrency == 1:
+                 data = [[e.model, e.test_name, e.t_s, e.ttfr, e.est_ppt, e.e2e_ttft] for e in self.entries]
+                 headers = ["model", "test", ts_header, "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
+
+            print(tabulate(data, headers=headers, tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right", "right")))
