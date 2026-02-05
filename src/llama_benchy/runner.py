@@ -144,7 +144,7 @@ class BenchmarkRunner:
                 "version": __version__,
                 "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"),
                 "latency_mode": self.config.latency_mode,
-                "latency_ms": latency,
+                "latency_ms": latency * 1000,
                 "model": self.config.model,
                 "prefix_caching_enabled": self.config.enable_prefix_caching,
                 "max_concurrency": self.config.concurrency

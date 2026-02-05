@@ -15,7 +15,6 @@ class BenchmarkMetric:
 
 @dataclass
 class BenchmarkRun:
-    model: str
     concurrency: int
     context_size: int
     prompt_size: int
@@ -35,6 +34,7 @@ class BenchmarkResults:
     def __init__(self):
         self.runs: List[BenchmarkRun] = []
         self.metadata: Dict[str, Any] = {}
+        self.model_name: Optional[str] = None
 
     def _calculate_metric(self, values: List[float], multiplier: float = 1.0) -> Optional[BenchmarkMetric]:
         if not values:
@@ -55,6 +55,9 @@ class BenchmarkResults:
             expected_pp_tokens: int,
             is_context_phase: bool = False):
         
+        if self.model_name is None:
+            self.model_name = model
+
         # Aggregators
         agg_pp_speeds = []
         agg_tg_speeds = []
@@ -93,7 +96,6 @@ class BenchmarkResults:
         run_metric_e2e_ttft = self._calculate_metric(agg_e2e_ttft_values, 1000)
 
         self.runs.append(BenchmarkRun(
-            model=model,
             concurrency=concurrency,
             context_size=depth,
             prompt_size=pp, # Configured prompt size
@@ -205,7 +207,7 @@ class BenchmarkResults:
                 # Context Phase Prompt Processing
                 if run.pp_throughput:
                     rows.append({
-                        "model": run.model,
+                        "model": self.model_name or "Unknown",
                         "test_name": f"ctx_pp @ d{run.context_size}",
                         "t_s": run.pp_throughput,
                         "t_s_req": run.pp_req_throughput,
@@ -217,7 +219,7 @@ class BenchmarkResults:
                 # Context Phase Token Generation
                 if run.tg_throughput:
                     rows.append({
-                        "model": run.model,
+                        "model": self.model_name or "Unknown",
                         "test_name": f"ctx_tg @ d{run.context_size}",
                         "t_s": run.tg_throughput,
                         "t_s_req": run.tg_req_throughput,
@@ -232,7 +234,7 @@ class BenchmarkResults:
                 # Prompt Processing
                 if run.pp_throughput:
                     rows.append({
-                        "model": run.model,
+                        "model": self.model_name or "Unknown",
                         "test_name": f"pp{run.prompt_size}{d_suffix}",
                         "t_s": run.pp_throughput,
                         "t_s_req": run.pp_req_throughput,
@@ -244,7 +246,7 @@ class BenchmarkResults:
                 # Token Generation
                 if run.tg_throughput:
                     rows.append({
-                        "model": run.model,
+                        "model": self.model_name or "Unknown",
                         "test_name": f"tg{run.response_size}{d_suffix}",
                         "t_s": run.tg_throughput,
                         "t_s_req": run.tg_req_throughput,
