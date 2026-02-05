@@ -99,10 +99,10 @@ class BenchmarkResults:
 
         # Calculate metrics for BenchmarkRun
         run_metric_pp_throughput = self._calculate_metric(agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds)
-        run_metric_pp_req_throughput = self._calculate_metric(agg_pp_speeds) if concurrency > 1 else None
+        run_metric_pp_req_throughput = run_metric_pp_throughput if concurrency == 1 else self._calculate_metric(agg_pp_speeds)
         
         run_metric_tg_throughput = self._calculate_metric(agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds)
-        run_metric_tg_req_throughput = self._calculate_metric(agg_tg_speeds) if concurrency > 1 else None
+        run_metric_tg_req_throughput = run_metric_tg_throughput if concurrency == 1 else self._calculate_metric(agg_tg_speeds)
 
         run_metric_ttfr = self._calculate_metric(agg_ttfr_values, 1000)
         run_metric_est_ppt = self._calculate_metric(agg_est_ppt_values, 1000)
