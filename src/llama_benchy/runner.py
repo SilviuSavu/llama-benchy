@@ -1,8 +1,11 @@
 import asyncio
 import subprocess
+import time
+from datetime import datetime, timezone
 from typing import List
 import aiohttp
 
+from ._version import __version__
 from .config import BenchmarkConfig
 from .client import LLMClient
 from .prompts import PromptGenerator
@@ -134,9 +137,17 @@ class BenchmarkRunner:
                              self.results.add(self.config.model, pp, tg, depth, self.config.concurrency, run_std_results, latency, expected_pp, is_context_phase=False)
                         else:
                              # Standard run expected tokens = pp + depth (usually depth=0 or concatenated)
-                             # For standard run, expected_tokens was passed to client call? Wait.
-                             # In standard run, run_benchmark received `expected_tokens`
                              # In the loop above: expected_tokens = current_pp + current_depth
                              self.results.add(self.config.model, pp, tg, depth, self.config.concurrency, run_std_results, latency, expected_pp + expected_ctx, is_context_phase=False)
 
-        self.results.print_report(self.config.concurrency)
+            self.results.metadata = {
+                "version": __version__,
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"),
+                "latency_mode": self.config.latency_mode,
+                "latency_ms": latency,
+                "model": self.config.model,
+                "prefix_caching_enabled": self.config.enable_prefix_caching,
+                "max_concurrency": self.config.concurrency
+            }
+        
+        self.results.save_report(self.config.save_result, self.config.result_format, self.config.concurrency)

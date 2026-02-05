@@ -1,7 +1,10 @@
 import numpy as np
 from tabulate import tabulate
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+import json
+import csv
+import sys
 
 from .client import RequestResult
 
@@ -11,18 +14,35 @@ class BenchmarkMetric:
     std: float
 
 @dataclass
-class BenchmarkResultEntry:
+class BenchmarkRun:
     model: str
-    test_name: str
-    t_s: Optional[BenchmarkMetric]
-    t_s_req: Optional[BenchmarkMetric]
+    concurrency: int
+    context_size: int
+    prompt_size: int
+    response_size: int
+    is_context_prefill_phase: bool
+    
+    # Metrics (using BenchmarkMetric)
+    pp_throughput: Optional[BenchmarkMetric]
+    pp_req_throughput: Optional[BenchmarkMetric]
+    tg_throughput: Optional[BenchmarkMetric]
+    tg_req_throughput: Optional[BenchmarkMetric]
     ttfr: Optional[BenchmarkMetric]
     est_ppt: Optional[BenchmarkMetric]
     e2e_ttft: Optional[BenchmarkMetric]
 
 class BenchmarkResults:
     def __init__(self):
-        self.entries: List[BenchmarkResultEntry] = []
+        self.runs: List[BenchmarkRun] = []
+        self.metadata: Dict[str, Any] = {}
+
+    def _calculate_metric(self, values: List[float], multiplier: float = 1.0) -> Optional[BenchmarkMetric]:
+        if not values:
+            return None
+        return BenchmarkMetric(
+            mean=np.mean(values) * multiplier,
+            std=np.std(values) * multiplier
+        )
 
     def add(self, 
             model: str, 
@@ -61,36 +81,32 @@ class BenchmarkResults:
                 agg_batch_tg_throughputs
             )
 
-        # Determine Test Name
-        prefix = "ctx_" if is_context_phase else ""
-        if is_context_phase:
-             test_name = f"ctx_pp @ d{depth}"
-             # Check if we have data
-             has_data = len(agg_pp_speeds) > 0 or len(agg_batch_pp_throughputs) > 0
-             if has_data:
-                 self._create_entry(model, test_name, concurrency, agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds, agg_ttfr_values, agg_est_ppt_values, agg_e2e_ttft_values, per_req_speeds=agg_pp_speeds if concurrency > 1 else None)
-             
-             test_name_tg = f"ctx_tg @ d{depth}"
-             has_data_tg = len(agg_tg_speeds) > 0 or len(agg_batch_tg_throughputs) > 0
-             if has_data_tg:
-                 self._create_entry(model, test_name_tg, concurrency, agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds, [], [], [], per_req_speeds=agg_tg_speeds if concurrency > 1 else None)
+        # Calculate metrics for BenchmarkRun
+        run_metric_pp_throughput = self._calculate_metric(agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds)
+        run_metric_pp_req_throughput = self._calculate_metric(agg_pp_speeds) if concurrency > 1 else None
+        
+        run_metric_tg_throughput = self._calculate_metric(agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds)
+        run_metric_tg_req_throughput = self._calculate_metric(agg_tg_speeds) if concurrency > 1 else None
 
-        else:
-            # Standard
-            test_name = f"pp{pp}"
-            if depth > 0: test_name += f" @ d{depth}"
-            
-            has_data = len(agg_pp_speeds) > 0 or len(agg_batch_pp_throughputs) > 0
-            if has_data:
-                self._create_entry(model, test_name, concurrency, agg_batch_pp_throughputs if concurrency > 1 else agg_pp_speeds, agg_ttfr_values, agg_est_ppt_values, agg_e2e_ttft_values, per_req_speeds=agg_pp_speeds if concurrency > 1 else None)
-            
-            test_name_tg = f"tg{tg}"
-            if depth > 0: test_name_tg += f" @ d{depth}"
-            
-            has_data_tg = len(agg_tg_speeds) > 0 or len(agg_batch_tg_throughputs) > 0
-            if has_data_tg:
-                self._create_entry(model, test_name_tg, concurrency, agg_batch_tg_throughputs if concurrency > 1 else agg_tg_speeds, [], [], [], per_req_speeds=agg_tg_speeds if concurrency > 1 else None)
+        run_metric_ttfr = self._calculate_metric(agg_ttfr_values, 1000)
+        run_metric_est_ppt = self._calculate_metric(agg_est_ppt_values, 1000)
+        run_metric_e2e_ttft = self._calculate_metric(agg_e2e_ttft_values, 1000)
 
+        self.runs.append(BenchmarkRun(
+            model=model,
+            concurrency=concurrency,
+            context_size=depth,
+            prompt_size=pp, # Configured prompt size
+            response_size=tg,
+            is_context_prefill_phase=is_context_phase,
+            pp_throughput=run_metric_pp_throughput,
+            pp_req_throughput=run_metric_pp_req_throughput,
+            tg_throughput=run_metric_tg_throughput,
+            tg_req_throughput=run_metric_tg_req_throughput,
+            ttfr=run_metric_ttfr,
+            est_ppt=run_metric_est_ppt,
+            e2e_ttft=run_metric_e2e_ttft
+        ))
 
     def _process_batch(self, 
                        results: List[RequestResult], 
@@ -182,64 +198,154 @@ class BenchmarkResults:
                      agg_batch_tg_throughputs.append(batch_tg_throughput)
 
 
-    def _create_entry(self, model, test_name, concurrency, speed_values, ttfr_values, est_ppt_values, e2e_ttft_values, per_req_speeds: Optional[List[float]] = None):
-        def calculate_metric(values, multiplier=1.0) -> Optional[BenchmarkMetric]:
-            if not values: return None
-            mean = np.mean(values) * multiplier
-            std = np.std(values) * multiplier
-            return BenchmarkMetric(mean=mean, std=std)
+    def _generate_rows(self) -> List[Dict[str, Any]]:
+        rows = []
+        for run in self.runs:
+            if run.is_context_prefill_phase:
+                # Context Phase Prompt Processing
+                if run.pp_throughput:
+                    rows.append({
+                        "model": run.model,
+                        "test_name": f"ctx_pp @ d{run.context_size}",
+                        "t_s": run.pp_throughput,
+                        "t_s_req": run.pp_req_throughput,
+                        "ttfr": run.ttfr,
+                        "est_ppt": run.est_ppt,
+                        "e2e_ttft": run.e2e_ttft
+                    })
+                
+                # Context Phase Token Generation
+                if run.tg_throughput:
+                    rows.append({
+                        "model": run.model,
+                        "test_name": f"ctx_tg @ d{run.context_size}",
+                        "t_s": run.tg_throughput,
+                        "t_s_req": run.tg_req_throughput,
+                        "ttfr": None,
+                        "est_ppt": None,
+                        "e2e_ttft": None
+                    })
+            else:
+                # Standard Phase
+                d_suffix = f" @ d{run.context_size}" if run.context_size > 0 else ""
+                
+                # Prompt Processing
+                if run.pp_throughput:
+                    rows.append({
+                        "model": run.model,
+                        "test_name": f"pp{run.prompt_size}{d_suffix}",
+                        "t_s": run.pp_throughput,
+                        "t_s_req": run.pp_req_throughput,
+                        "ttfr": run.ttfr,
+                        "est_ppt": run.est_ppt,
+                        "e2e_ttft": run.e2e_ttft
+                    })
+                
+                # Token Generation
+                if run.tg_throughput:
+                    rows.append({
+                        "model": run.model,
+                        "test_name": f"tg{run.response_size}{d_suffix}",
+                        "t_s": run.tg_throughput,
+                        "t_s_req": run.tg_req_throughput,
+                        "ttfr": None,
+                        "est_ppt": None,
+                        "e2e_ttft": None
+                    })
+        return rows
 
-        t_s_metric = calculate_metric(speed_values)
-        t_s_req_metric = None
-        
-        if per_req_speeds and concurrency > 1:
-            t_s_req_metric = calculate_metric(per_req_speeds)
+    def _generate_md_report(self, concurrency: int) -> str:
+        rows = self._generate_rows()
+        if not rows:
+            return "No results collected. Check if the model is generating tokens."
 
-        self.entries.append(BenchmarkResultEntry(
-            model=model,
-            test_name=test_name,
-            t_s=t_s_metric,
-            t_s_req=t_s_req_metric,
-            ttfr=calculate_metric(ttfr_values, 1000),
-            est_ppt=calculate_metric(est_ppt_values, 1000),
-            e2e_ttft=calculate_metric(e2e_ttft_values, 1000)
-        ))
-
-    def print_report(self, concurrency: int = 1):
         def fmt(metric: Optional[BenchmarkMetric]) -> str:
             if metric is None:
                 return ""
             return f"{metric.mean:.2f} ± {metric.std:.2f}"
-
-        data = [[
-            e.model, 
-            e.test_name, 
-            fmt(e.t_s), 
-            fmt(e.t_s_req), 
-            fmt(e.ttfr), 
-            fmt(e.est_ppt), 
-            fmt(e.e2e_ttft)
-        ] for e in self.entries]
-        
-        print()
-        if not data:
-            print("No results collected. Check if the model is generating tokens.")
-        else:
-            ts_header = "t/s (total)" if concurrency > 1 else "t/s"
-            headers = ["model", "test", ts_header, "t/s (req)", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
             
-            # If no concurrency, hide the redundant column if desired, OR keep for consistency.
-            # Usually if concurrency=1, t/s (req) is identical to t/s total.
-            # Let's hide it if concurrency == 1 to keep table clean.
-            if concurrency == 1:
-                 data = [[
-                     e.model, 
-                     e.test_name, 
-                     fmt(e.t_s), 
-                     fmt(e.ttfr), 
-                     fmt(e.est_ppt), 
-                     fmt(e.e2e_ttft)
-                 ] for e in self.entries]
-                 headers = ["model", "test", ts_header, "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
+        data = [[
+            row["model"], 
+            row["test_name"], 
+            fmt(row["t_s"]), 
+            fmt(row["t_s_req"]), 
+            fmt(row["ttfr"]), 
+            fmt(row["est_ppt"]), 
+            fmt(row["e2e_ttft"])
+        ] for row in rows]
 
-            print(tabulate(data, headers=headers, tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right", "right")))
+        ts_header = "t/s (total)" if concurrency > 1 else "t/s"
+        headers = ["model", "test", ts_header, "t/s (req)", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
+        
+        if concurrency == 1:
+            data = [[
+                row["model"], 
+                row["test_name"], 
+                fmt(row["t_s"]), 
+                fmt(row["ttfr"]), 
+                fmt(row["est_ppt"]), 
+                fmt(row["e2e_ttft"])
+            ] for row in rows]
+            headers = ["model", "test", ts_header, "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
+
+        return tabulate(data, headers=headers, tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right", "right") if concurrency > 1 else ("left", "right", "right", "right", "right", "right"))
+
+    def save_report(self, filename: Optional[str], format: str, concurrency: int = 1):
+        if format == "md":
+            output = self._generate_md_report(concurrency)
+            if filename:
+                with open(filename, "w") as f:
+                    f.write(output)
+            else:
+                 print("\n" + output)
+        
+        elif format == "json":
+            data = {**self.metadata}
+            data["benchmarks"] = [asdict(run) for run in self.runs]
+            
+            if filename:
+                 with open(filename, "w") as f:
+                     json.dump(data, f, indent=2)
+            else:
+                 print(json.dumps(data, indent=2))
+        
+        elif format == "csv":
+             rows = self._generate_rows()
+             csv_rows = []
+             headers = ["model", "test_name", "t_s_mean", "t_s_std", "t_s_req_mean", "t_s_req_std", "ttfr_mean", "ttfr_std", "est_ppt_mean", "est_ppt_std", "e2e_ttft_mean", "e2e_ttft_std"]
+             
+             for r in rows:
+                 row = {
+                     "model": r["model"],
+                     "test_name": r["test_name"],
+                     "t_s_mean": r["t_s"].mean if r["t_s"] else None,
+                     "t_s_std": r["t_s"].std if r["t_s"] else None,
+                     "t_s_req_mean": r["t_s_req"].mean if r["t_s_req"] else None,
+                     "t_s_req_std": r["t_s_req"].std if r["t_s_req"] else None,
+                     "ttfr_mean": r["ttfr"].mean if r["ttfr"] else None,
+                     "ttfr_std": r["ttfr"].std if r["ttfr"] else None,
+                     "est_ppt_mean": r["est_ppt"].mean if r["est_ppt"] else None,
+                     "est_ppt_std": r["est_ppt"].std if r["est_ppt"] else None,
+                     "e2e_ttft_mean": r["e2e_ttft"].mean if r["e2e_ttft"] else None,
+                     "e2e_ttft_std": r["e2e_ttft"].std if r["e2e_ttft"] else None,
+                 }
+                 csv_rows.append(row)
+             
+             output_file = filename if filename else sys.stdout
+             is_file = isinstance(output_file, str)
+             
+             if is_file:
+                 with open(output_file, "w", newline="") as f:
+                      writer = csv.DictWriter(f, fieldnames=headers)
+                      writer.writeheader()
+                      writer.writerows(csv_rows)
+             else:
+                 writer = csv.DictWriter(sys.stdout, fieldnames=headers)
+                 writer.writeheader()
+                 writer.writerows(csv_rows)
+
+    def print_report(self, concurrency: int = 1):
+        # Determine if we should print or save is handled by calling code usually, 
+        # but to keep backward compat (if used elsewhere), we can just alias to save_report(None, "md")
+        self.save_report(None, "md", concurrency)
+

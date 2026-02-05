@@ -22,6 +22,8 @@ class BenchmarkConfig:
     book_url: str
     post_run_cmd: Optional[str]
     concurrency: int = 1
+    save_result: Optional[str] = None
+    result_format: str = "md"
 
     @classmethod
     def from_args(cls):
@@ -48,6 +50,8 @@ class BenchmarkConfig:
         parser.add_argument("--no-adapt-prompt", action="store_false", dest="adapt_prompt", help="Disable prompt size adaptation")
         parser.add_argument("--enable-prefix-caching", action="store_true", help="Enable prefix caching performance measurement")
         parser.add_argument("--concurrency", type=int, default=1, help="Number of concurrent requests per test - default: 1")
+        parser.add_argument("--save-result", type=str, help="File to save results to")
+        parser.add_argument("--format", type=str, default="md", choices=["md", "json", "csv"], help="Output format")
         
         # We can add version here if we want to support --version in the same way
         # But commonly version is printed or handled before main logic.
@@ -71,5 +75,7 @@ class BenchmarkConfig:
             enable_prefix_caching=args.enable_prefix_caching,
             book_url=args.book_url,
             post_run_cmd=args.post_run_cmd,
-            concurrency=args.concurrency
+            concurrency=args.concurrency,
+            save_result=args.save_result,
+            result_format=args.format
         )
