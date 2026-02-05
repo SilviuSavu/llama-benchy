@@ -9,7 +9,7 @@ from ._version import __version__
 from .config import BenchmarkConfig
 from .client import LLMClient
 from .prompts import PromptGenerator
-from .results import BenchmarkResults
+from .results import BenchmarkResults, BenchmarkMetadata
 
 class BenchmarkRunner:
     def __init__(self, config: BenchmarkConfig, client: LLMClient, prompt_generator: PromptGenerator):
@@ -142,14 +142,14 @@ class BenchmarkRunner:
                                 # In the loop above: expected_tokens = current_pp + current_depth
                                 self.results.add(self.config.model, pp, tg, depth, concurrency, run_std_results, latency, expected_pp + expected_ctx, is_context_phase=False)
 
-            self.results.metadata = {
-                "version": __version__,
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"),
-                "latency_mode": self.config.latency_mode,
-                "latency_ms": latency * 1000,
-                "model": self.config.model,
-                "prefix_caching_enabled": self.config.enable_prefix_caching,
-                "max_concurrency": max(self.config.concurrency_levels) if self.config.concurrency_levels else 1
-            }
+            self.results.metadata = BenchmarkMetadata(
+                version=__version__,
+                timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"),
+                latency_mode=self.config.latency_mode,
+                latency_ms=latency * 1000,
+                model=self.config.model,
+                prefix_caching_enabled=self.config.enable_prefix_caching,
+                max_concurrency=max(self.config.concurrency_levels) if self.config.concurrency_levels else 1
+            )
         
         self.results.save_report(self.config.save_result, self.config.result_format, max(self.config.concurrency_levels) if self.config.concurrency_levels else 1)

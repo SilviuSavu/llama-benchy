@@ -14,6 +14,16 @@ class BenchmarkMetric:
     std: float
 
 @dataclass
+class BenchmarkMetadata:
+    version: str
+    timestamp: str
+    latency_mode: str
+    latency_ms: float
+    model: str
+    prefix_caching_enabled: bool
+    max_concurrency: int
+
+@dataclass
 class BenchmarkRun:
     concurrency: int
     context_size: int
@@ -33,7 +43,7 @@ class BenchmarkRun:
 class BenchmarkResults:
     def __init__(self):
         self.runs: List[BenchmarkRun] = []
-        self.metadata: Dict[str, Any] = {}
+        self.metadata: Optional[BenchmarkMetadata] = None
         self.model_name: Optional[str] = None
 
     def _calculate_metric(self, values: List[float], multiplier: float = 1.0) -> Optional[BenchmarkMetric]:
@@ -203,7 +213,10 @@ class BenchmarkResults:
     def _generate_rows(self) -> List[Dict[str, Any]]:
         rows = []
         for run in self.runs:
-            c_suffix = f" (c{run.concurrency})"
+            c_suffix = ""
+            if self.metadata and self.metadata.max_concurrency > 1:
+                c_suffix = f" (c{run.concurrency})"
+
             if run.is_context_prefill_phase:
                 # Context Phase Prompt Processing
                 if run.pp_throughput:
@@ -311,7 +324,7 @@ class BenchmarkResults:
                  print("\n" + output)
         
         elif format == "json":
-            data = {**self.metadata}
+            data = asdict(self.metadata) if self.metadata else {}
             data["benchmarks"] = [asdict(run) for run in self.runs]
             
             if filename:

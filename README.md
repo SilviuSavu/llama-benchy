@@ -28,12 +28,12 @@ As of January 2nd, 2026, I wasn't able to find any existing benchmarking tool th
 - Downloads a book from Project Gutenberg to use as source text for prompts to ensure better benchmarking of spec.decoding/MTP models.
 - Supports executing a command after each run (e.g., to clear cache).
 - Configurable latency measurement mode.
+- Supports concurrent requests (`--concurrency`) to measure throughput under load.
+- Can save results to file in Markdown, JSON, or CSV format.
 
 # Current Limitations
 
 - Evaluates against `/v1/chat/completions` endpoint only.
-- Doesn't measure throughput in concurrency mode (coming later).
-- Outputs results as a Markdown table only for now.
 
 ## Installation
 
@@ -168,6 +168,9 @@ Generally you don't need to disable prompt caching on the server, as a probabili
 -   `--adapt-prompt`: Adapt prompt size based on warmup token usage delta (Default: True).
 -   `--no-adapt-prompt`: Disable prompt size adaptation.
 -   `--enable-prefix-caching`: Enable prefix caching performance measurement. When enabled (and depth > 0), it performs a two-step benchmark: first loading the context (reported as `ctx_pp`), then running the prompt with the cached context.
+-   `--concurrency`: List of concurrency levels (number of concurrent requests per test) (Default: [1]).
+-   `--save-result`: File to save results to.
+-   `--format`: Output format: 'md', 'json', 'csv' (Default: 'md').
 
 ### Metrics
 
@@ -183,6 +186,9 @@ The script attempts to estimate network or processing latency to provide "server
 
 #### Table Columns
 
+    -   When `concurrency` > 1:
+        -   **`t/s (total)`**: Total throughput across all concurrent requests.
+        -   **`t/s (req)`**: Average throughput per individual request.
 -   **`t/s` (Tokens per Second)**:
     -   **For Prompt Processing (pp)**: Calculated as `Total Prompt Tokens / est_ppt`. This represents the prefill speed.
     -   **For Token Generation (tg)**: Calculated as `(Total Generated Tokens - 1) / (Time of Last Token - Time of First Token)`. This represents the decode speed, excluding the first token latency.
