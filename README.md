@@ -228,3 +228,31 @@ llama-benchy \
 ```
 
 This will run benchmarks for all combinations of pp (128, 256), tg (32, 64), and depth (0, 1024).
+
+## Development
+
+### Running Integration Tests
+
+This repository includes a mock server and an integration test suite to verify `llama-benchy` logic without needing a real GPU server.
+
+The mock server emulates:
+-   **Prompt Processing (PP):** ~1000 t/s drift-corrected.
+-   **Token Generation (TG):** ~50 t/s.
+-   **Prefix Caching:** Emulates cache hits by skipping processing time for cached prefixes (system messages).
+-   **OpenAI API Compatibility**: Serves `/v1/chat/completions` and `/v1/models`.
+
+To run the integration tests:
+
+```bash
+# Install development dependencies
+uv sync --all-extras --dev
+
+# Run tests
+uv run pytest tests/test_mock_integration.py
+```
+
+This test will:
+1.  Spin up the mock server on port 8001.
+2.  Run `llama-benchy` against it.
+3.  Parse the JSON output.
+4.  Verify that throughputs match the emulated speeds (PP ~1000, TG ~50) and that caching effectively increases effective throughput.
