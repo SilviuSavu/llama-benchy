@@ -2,17 +2,59 @@ import asyncio
 import time
 import uuid
 import json
-from typing import List, Optional, Dict, Any
+import logging
+from typing import List, Optional, Dict, Any, Union
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
+from transformers import AutoTokenizer
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("mock_server")
 
 app = FastAPI()
 
 # Configuration constants
 PROMPT_SPEED_TPS = 1000.0
 GEN_SPEED_TPS = 50.0
+
+# Global Tokenizer Cache
+TOKENIZERS = {}
+DEFAULT_TOKENIZER_NAME = "gpt2"
+
+def get_tokenizer(model_name: str):
+    """
+    Get cached tokenizer or load it.
+    Fallback to gpt2 for 'test', 'mock-model', or if load fails.
+    """
+    # Normalize model name for lookup
+    if model_name in ["test", "mock-model"]:
+        model_name = DEFAULT_TOKENIZER_NAME
+    
+    if model_name in TOKENIZERS:
+        return TOKENIZERS[model_name]
+    
+    try:
+        logger.info(f"Loading tokenizer for: {model_name}")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    except Exception as e:
+        logger.warning(f"Failed to load tokenizer for {model_name}: {e}. Falling back to {DEFAULT_TOKENIZER_NAME}")
+        # Try loading default if distinct
+        if model_name != DEFAULT_TOKENIZER_NAME:
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(DEFAULT_TOKENIZER_NAME)
+            except Exception:
+                # If even default fails (network?), we might need a dummy fallback, 
+                # but transformers usually caches gpt2. 
+                # For now let's assume gpt2 works as per env check.
+                raise e
+        else:
+            raise e
+
+    TOKENIZERS[model_name] = tokenizer
+    return tokenizer
 
 class Message(BaseModel):
     role: str
@@ -30,13 +72,16 @@ class ChatCompletionRequest(BaseModel):
     top_p: Optional[float] = 1.0
     n: Optional[int] = 1
 
-def count_tokens(text: str) -> int:
-    """Predictable token counting: 1 token per 4 characters."""
+def count_tokens(text: str, model_name: str) -> int:
+    """Count tokens using the appropriate tokenizer."""
     if not text:
         return 0
-    return max(1, len(text) // 4)
+    
+    tokenizer = get_tokenizer(model_name)
+    return len(tokenizer.encode(text, add_special_tokens=False))
 
 @app.get("/models")
+@app.get("/v1/models")
 async def list_models():
     return {
         "object": "list",
@@ -51,6 +96,7 @@ async def list_models():
     }
 
 @app.post("/chat/completions")
+@app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     # Analyze messages for token counting and prefix caching logic
     system_tokens = 0
@@ -60,8 +106,11 @@ async def chat_completions(request: ChatCompletionRequest):
     has_system = False
     has_user = False
     
+    # Pre-warm/Get tokenizer for consistency
+    # (Doing this one by one might be slightly inefficient but accurate)
+    
     for msg in request.messages:
-        t_count = count_tokens(msg.content)
+        t_count = count_tokens(msg.content, request.model)
         if msg.role == "system":
             system_tokens += t_count
             has_system = True
@@ -75,17 +124,10 @@ async def chat_completions(request: ChatCompletionRequest):
     
     # Emulate Prompt Processing Logic
     # If both system and user are provided, system content processing is cached.
-    # Requirement: "when both system and user are provided, system content processing 
-    # will be assumed cached and only user content will be used to emulate prompt processing"
     tokens_to_process = total_prompt_tokens
     if has_system and has_user:
         tokens_to_process = user_tokens + other_tokens
     
-    # If cache_prompt is explicitly False, we might want to override the caching behavior logic
-    # But the requirement specifically mentions behavior based on content presence. 
-    # I will stick to the requirement unless 'no_cache' flag from client implies otherwise.
-    # The client sends "cache_prompt": False if no_cache is True.
-    # So if cache_prompt is False, we should probably force full processing.
     if request.cache_prompt is False:
         tokens_to_process = total_prompt_tokens
 
@@ -98,6 +140,9 @@ async def chat_completions(request: ChatCompletionRequest):
 
     request_id = f"chatcmpl-{uuid.uuid4()}"
     created_time = int(time.time())
+    
+    # Log the decision for debugging
+    logger.info(f"Model: {request.model}, Prompt Tokens: {total_prompt_tokens} (Sys: {system_tokens}, User: {user_tokens}), Delay tokens: {tokens_to_process}, Delay: {prompt_delay:.4f}s")
     
     # Simulate Prompt Processing Delay
     if prompt_delay > 0:
@@ -194,4 +239,11 @@ async def chat_completions(request: ChatCompletionRequest):
         }
 
 if __name__ == "__main__":
+    # Pre-load gpt2 to avoid runtime delay on first request in tests
+    try:
+        print("Pre-loading tokenizer...")
+        AutoTokenizer.from_pretrained(DEFAULT_TOKENIZER_NAME)
+        print("Tokenizer loaded.")
+    except Exception as e:
+        print(f"Warning: Could not pre-load tokenizer: {e}")
     uvicorn.run(app, host="0.0.0.0", port=8000)
