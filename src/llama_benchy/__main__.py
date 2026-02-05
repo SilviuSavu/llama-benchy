@@ -1,6 +1,5 @@
 """
 Main entry point for the llama-benchy CLI.
-Refactored into object-oriented design.
 """
 
 import asyncio

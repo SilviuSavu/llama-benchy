@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 import argparse
 import os
+from ._version import __version__
 
 @dataclass
 class BenchmarkConfig:
@@ -28,10 +29,7 @@ class BenchmarkConfig:
     @classmethod
     def from_args(cls):
         parser = argparse.ArgumentParser(description="LLM Benchmark Script")
-        # Build number comes from package version which is handled in main, 
-        # but we can add version argument here if needed, or rely on main to add it.
-        # For now, let's just use standard argparse structure.
-        
+        parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
         parser.add_argument("--base-url", type=str, required=True, help="OpenAI compatible endpoint URL")
         parser.add_argument("--api-key", type=str, default="EMPTY", help="API Key for the endpoint")
         parser.add_argument("--model", type=str, required=True, help="Model name to use for benchmarking")
@@ -52,10 +50,7 @@ class BenchmarkConfig:
         parser.add_argument("--concurrency", type=int, default=1, help="Number of concurrent requests per test - default: 1")
         parser.add_argument("--save-result", type=str, help="File to save results to")
         parser.add_argument("--format", type=str, default="md", choices=["md", "json", "csv"], help="Output format")
-        
-        # We can add version here if we want to support --version in the same way
-        # But commonly version is printed or handled before main logic.
-        
+          
         args = parser.parse_args()
         
         return cls(

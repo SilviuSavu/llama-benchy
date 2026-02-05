@@ -293,6 +293,14 @@ class BenchmarkResults:
         return tabulate(data, headers=headers, tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right", "right") if concurrency > 1 else ("left", "right", "right", "right", "right", "right"))
 
     def save_report(self, filename: Optional[str], format: str, concurrency: int = 1):
+        msg = ""
+        if filename:
+            msg += f"Saving results to {filename} in {format.upper()} format...\n"
+        else:            
+            msg += f"Printing results in {format.upper()} format:\n"
+
+        print(f"{msg}\n")
+
         if format == "md":
             output = self._generate_md_report(concurrency)
             if filename:
@@ -346,8 +354,4 @@ class BenchmarkResults:
                  writer.writeheader()
                  writer.writerows(csv_rows)
 
-    def print_report(self, concurrency: int = 1):
-        # Determine if we should print or save is handled by calling code usually, 
-        # but to keep backward compat (if used elsewhere), we can just alias to save_report(None, "md")
-        self.save_report(None, "md", concurrency)
 
