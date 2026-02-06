@@ -30,6 +30,7 @@ As of January 2nd, 2026, I wasn't able to find any existing benchmarking tool th
 - Configurable latency measurement mode.
 - Supports concurrent requests (`--concurrency`) to measure throughput under load.
 - Can save results to file in Markdown, JSON, or CSV format.
+- Can save granular time-series data for token generation when JSON output is used (`--save-all-throughput-data`).
 
 # Current Limitations
 
@@ -171,6 +172,7 @@ Generally you don't need to disable prompt caching on the server, as a probabili
 -   `--concurrency`: List of concurrency levels (number of concurrent requests per test) (Default: [1]).
 -   `--save-result`: File to save results to.
 -   `--format`: Output format: 'md', 'json', 'csv' (Default: 'md').
+-   `--save-all-throughput-data`: Save calculated throughput for each 1‑second window inside peak throughput calculation (Default: off).
 
 ### Metrics
 
@@ -186,12 +188,15 @@ The script attempts to estimate network or processing latency to provide "server
 
 #### Table Columns
 
-    -   When `concurrency` > 1:
-        -   **`t/s (total)`**: Total throughput across all concurrent requests.
-        -   **`t/s (req)`**: Average throughput per individual request.
 -   **`t/s` (Tokens per Second)**:
     -   **For Prompt Processing (pp)**: Calculated as `Total Prompt Tokens / est_ppt`. This represents the prefill speed.
     -   **For Token Generation (tg)**: Calculated as `(Total Generated Tokens - 1) / (Time of Last Token - Time of First Token)`. This represents the decode speed, excluding the first token latency.
+        -   When `concurrency` > 1:
+        -   **`t/s (total)`**: Total throughput across all concurrent requests.
+        -   **`t/s (req)`**: Average throughput per individual request.
+
+- **`peak t/s` (Maximum observed Tokens per Second)**: 
+    - **Only for Token Generation (tg)**: The highest token‑generation throughput observed in any 1‑second window during the run across all concurrent requests.
 
 -   **`ttfr (ms)` (Time To First Response)**:
     -   Calculation: `Time of First Response Chunk - Start Time`.
