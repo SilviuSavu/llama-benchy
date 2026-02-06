@@ -4,7 +4,7 @@ import codecs
 import aiohttp
 import asyncio
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 
 @dataclass
@@ -16,6 +16,7 @@ class RequestResult:
     prompt_tokens: int = 0
     total_tokens: int = 0
     error: Optional[str] = None
+    token_timestamps: List[float] = field(default_factory=list)
 
 class LLMClient:
     def __init__(self, base_url: str, api_key: str, model_name: str):
@@ -187,6 +188,7 @@ class LLMClient:
                                             result.first_token_ts = chunk_time
                                         
                                         result.total_tokens += 1
+                                        result.token_timestamps.append(chunk_time)
                             except json.JSONDecodeError:
                                 continue
             
