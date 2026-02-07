@@ -25,7 +25,8 @@ class BenchmarkConfig:
     concurrency_levels: List[int]
     save_result: Optional[str] = None
     result_format: str = "md"
-    save_all_throughput_data: bool = False
+    save_total_throughput_timeseries: bool = False
+    save_all_throughput_timeseries: bool = False
 
     @classmethod
     def from_args(cls):
@@ -51,7 +52,8 @@ class BenchmarkConfig:
         parser.add_argument("--concurrency", type=int, nargs='+', default=[1], help="List of concurrency levels (number of concurrent requests per test) - default: [1]")
         parser.add_argument("--save-result", type=str, help="File to save results to")
         parser.add_argument("--format", type=str, default="md", choices=["md", "json", "csv"], help="Output format")
-        parser.add_argument("--save-all-throughput-data", action="store_true", help="Save calculated throughput for each 1 second window inside peak throughput calculation during the run.")
+        parser.add_argument("--save-total-throughput-timeseries", action="store_true", help="Save calculated TOTAL throughput for each 1 second window inside peak throughput calculation during the run.")
+        parser.add_argument("--save-all-throughput-timeseries", action="store_true", help="Save calculated throughput timeseries for EACH individual request.")
           
         args = parser.parse_args()
         
@@ -75,5 +77,6 @@ class BenchmarkConfig:
             concurrency_levels=args.concurrency,
             save_result=args.save_result,
             result_format=args.format,
-            save_all_throughput_data=args.save_all_throughput_data
+            save_total_throughput_timeseries=args.save_total_throughput_timeseries,
+            save_all_throughput_timeseries=args.save_all_throughput_timeseries
         )

@@ -38,10 +38,12 @@ class BenchmarkRun:
     tg_throughput: Optional[BenchmarkMetric]
     tg_req_throughput: Optional[BenchmarkMetric]
     peak_throughput: Optional[BenchmarkMetric]
+    peak_req_throughput: Optional[BenchmarkMetric]
     ttfr: Optional[BenchmarkMetric]
     est_ppt: Optional[BenchmarkMetric]
     e2e_ttft: Optional[BenchmarkMetric]
     throughput_over_time: Optional[List[List[float]]] = None
+    requests_throughput_over_time: Optional[List[List[List[List[float]]]]] = None
 
 class BenchmarkResults:
     def __init__(self):
@@ -122,7 +124,8 @@ class BenchmarkResults:
             latency: float, 
             expected_pp_tokens: int,
             is_context_phase: bool = False,
-            save_all_throughput_data: bool = False):
+            save_total_throughput_timeseries: bool = False,
+            save_all_throughput_timeseries: bool = False):
         
         if self.model_name is None:
             self.model_name = model
@@ -138,8 +141,10 @@ class BenchmarkResults:
         agg_batch_pp_throughputs = []
         agg_batch_tg_throughputs = []
         agg_peak_throughputs = []
+        agg_peak_req_throughputs = []
         
         agg_throughput_series = []
+        agg_req_throughput_series = []
 
         for batch in run_results:
             self._process_batch(
@@ -155,8 +160,11 @@ class BenchmarkResults:
                 agg_batch_pp_throughputs, 
                 agg_batch_tg_throughputs,
                 agg_peak_throughputs,
-                save_all_throughput_data=save_all_throughput_data,
-                agg_throughput_series=agg_throughput_series
+                agg_peak_req_throughputs,
+                save_total_throughput_timeseries=save_total_throughput_timeseries,
+                save_all_throughput_timeseries=save_all_throughput_timeseries,
+                agg_throughput_series=agg_throughput_series,
+                agg_req_throughput_series=agg_req_throughput_series
             )
 
         # Calculate metrics for BenchmarkRun
@@ -167,6 +175,7 @@ class BenchmarkResults:
         run_metric_tg_req_throughput = run_metric_tg_throughput if concurrency == 1 else self._calculate_metric(agg_tg_speeds)
 
         run_metric_peak_throughput = self._calculate_metric(agg_peak_throughputs)
+        run_metric_peak_req_throughput = self._calculate_metric(agg_peak_req_throughputs)
 
         run_metric_ttfr = self._calculate_metric(agg_ttfr_values, 1000)
         run_metric_est_ppt = self._calculate_metric(agg_est_ppt_values, 1000)
@@ -183,10 +192,12 @@ class BenchmarkResults:
             tg_throughput=run_metric_tg_throughput,
             tg_req_throughput=run_metric_tg_req_throughput,
             peak_throughput=run_metric_peak_throughput,
+            peak_req_throughput=run_metric_peak_req_throughput,
             ttfr=run_metric_ttfr,
             est_ppt=run_metric_est_ppt,
             e2e_ttft=run_metric_e2e_ttft,
-            throughput_over_time=agg_throughput_series if save_all_throughput_data else None
+            throughput_over_time=agg_throughput_series if save_total_throughput_timeseries else None,
+            requests_throughput_over_time=agg_req_throughput_series if save_all_throughput_timeseries else None
         ))
 
     def _process_batch(self, 
@@ -202,8 +213,11 @@ class BenchmarkResults:
                        agg_batch_pp_throughputs: List[float],
                        agg_batch_tg_throughputs: List[float],
                        agg_peak_throughputs: List[float],
-                       save_all_throughput_data: bool = False,
-                       agg_throughput_series: Optional[List[List[float]]] = None):
+                       agg_peak_req_throughputs: List[float],
+                       save_total_throughput_timeseries: bool = False,
+                       save_all_throughput_timeseries: bool = False,
+                       agg_throughput_series: Optional[List[List[float]]] = None,
+                       agg_req_throughput_series: Optional[List[List[List[float]]]] = None):
         
         valid_results = [r for r in results if r and not r.error]
         if not valid_results:
@@ -219,12 +233,26 @@ class BenchmarkResults:
         
         # Collect all token timestamps for peak calculation
         all_token_timestamps = []
+        
+        batch_req_series = []
 
         for res in valid_results:
             start_times.append(res.start_ts)
             end_times.append(res.end_ts)
             all_token_timestamps.extend(res.token_timestamps)
             
+            if save_all_throughput_timeseries:
+                if res.token_timestamps:
+                    # Calculate per-request throughput series
+                    peak, series = self._calculate_peak_throughput(res.token_timestamps, return_series=True)
+                    batch_req_series.append(series)
+                    agg_peak_req_throughputs.append(peak)
+                else:
+                    batch_req_series.append([])
+            elif res.token_timestamps:
+                 peak = self._calculate_peak_throughput(res.token_timestamps, return_series=False)
+                 agg_peak_req_throughputs.append(peak)
+
             if res.token_timestamps:
                 last_token_times.append(res.token_timestamps[-1])
             elif res.end_ts:
@@ -271,6 +299,9 @@ class BenchmarkResults:
                 if decode_time > 0:
                     tg_speed = (res.total_tokens - 1) / decode_time
                     agg_tg_speeds.append(tg_speed)
+        
+        if save_all_throughput_timeseries and agg_req_throughput_series is not None:
+             agg_req_throughput_series.append(batch_req_series)
 
         # Batch-Level Throughput
         if start_times and end_times and first_token_times:
@@ -297,8 +328,8 @@ class BenchmarkResults:
                      agg_batch_tg_throughputs.append(batch_tg_throughput)
 
         if all_token_timestamps:
-            res = self._calculate_peak_throughput(all_token_timestamps, return_series=save_all_throughput_data)
-            if save_all_throughput_data:
+            res = self._calculate_peak_throughput(all_token_timestamps, return_series=save_total_throughput_timeseries)
+            if save_total_throughput_timeseries:
                 peak, series = res
                 agg_peak_throughputs.append(peak)
                 if agg_throughput_series is not None:
@@ -323,6 +354,7 @@ class BenchmarkResults:
                         "t_s": run.pp_throughput,
                         "t_s_req": run.pp_req_throughput,
                         "peak_ts": None,
+                        "peak_ts_req": None,
                         "ttfr": run.ttfr,
                         "est_ppt": run.est_ppt,
                         "e2e_ttft": run.e2e_ttft
@@ -336,6 +368,7 @@ class BenchmarkResults:
                         "t_s": run.tg_throughput,
                         "t_s_req": run.tg_req_throughput,
                         "peak_ts": run.peak_throughput,
+                        "peak_ts_req": run.peak_req_throughput,
                         "ttfr": None,
                         "est_ppt": None,
                         "e2e_ttft": None
@@ -352,6 +385,7 @@ class BenchmarkResults:
                         "t_s": run.pp_throughput,
                         "t_s_req": run.pp_req_throughput,
                         "peak_ts": None,
+                        "peak_ts_req": None,
                         "ttfr": run.ttfr,
                         "est_ppt": run.est_ppt,
                         "e2e_ttft": run.e2e_ttft
@@ -365,6 +399,7 @@ class BenchmarkResults:
                         "t_s": run.tg_throughput,
                         "t_s_req": run.tg_req_throughput,
                         "peak_ts": run.peak_throughput,
+                        "peak_ts_req": run.peak_req_throughput,
                         "ttfr": None,
                         "est_ppt": None,
                         "e2e_ttft": None
@@ -387,13 +422,14 @@ class BenchmarkResults:
             fmt(row["t_s"]), 
             fmt(row["t_s_req"]), 
             fmt(row["peak_ts"]),
+            fmt(row["peak_ts_req"]),
             fmt(row["ttfr"]), 
             fmt(row["est_ppt"]), 
             fmt(row["e2e_ttft"])
         ] for row in rows]
 
         ts_header = "t/s (total)" if concurrency > 1 else "t/s"
-        headers = ["model", "test", ts_header, "t/s (req)", "peak t/s", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
+        headers = ["model", "test", ts_header, "t/s (req)", "peak t/s", "peak t/s (req)", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
         
         if concurrency == 1:
             data = [[
@@ -401,13 +437,14 @@ class BenchmarkResults:
                 row["test_name"], 
                 fmt(row["t_s"]),
                 fmt(row["peak_ts"]),
+                fmt(row["peak_ts_req"]),
                 fmt(row["ttfr"]), 
                 fmt(row["est_ppt"]), 
                 fmt(row["e2e_ttft"])
             ] for row in rows]
-            headers = ["model", "test", ts_header, "peak t/s", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
+            headers = ["model", "test", ts_header, "peak t/s", "peak t/s (req)", "ttfr (ms)", "est_ppt (ms)", "e2e_ttft (ms)"]
 
-        return tabulate(data, headers=headers, tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right", "right", "right") if concurrency > 1 else ("left", "right", "right", "right", "right", "right", "right"))
+        return tabulate(data, headers=headers, tablefmt="pipe", colalign=("left", "right", "right", "right", "right", "right", "right", "right", "right") if concurrency > 1 else ("left", "right", "right", "right", "right", "right", "right", "right"))
 
     def save_report(self, filename: Optional[str], format: str, concurrency: int = 1):
         msg = ""
@@ -439,7 +476,7 @@ class BenchmarkResults:
         elif format == "csv":
              rows = self._generate_rows()
              csv_rows = []
-             headers = ["model", "test_name", "t_s_mean", "t_s_std", "t_s_req_mean", "t_s_req_std", "peak_ts_mean", "peak_ts_std", "ttfr_mean", "ttfr_std", "est_ppt_mean", "est_ppt_std", "e2e_ttft_mean", "e2e_ttft_std"]
+             headers = ["model", "test_name", "t_s_mean", "t_s_std", "t_s_req_mean", "t_s_req_std", "peak_ts_mean", "peak_ts_std", "peak_ts_req_mean", "peak_ts_req_std", "ttfr_mean", "ttfr_std", "est_ppt_mean", "est_ppt_std", "e2e_ttft_mean", "e2e_ttft_std"]
              
              for r in rows:
                  row = {
@@ -451,6 +488,8 @@ class BenchmarkResults:
                      "t_s_req_std": r["t_s_req"].std if r["t_s_req"] else None,
                      "peak_ts_mean": r["peak_ts"].mean if r["peak_ts"] else None,
                      "peak_ts_std": r["peak_ts"].std if r["peak_ts"] else None,
+                     "peak_ts_req_mean": r["peak_ts_req"].mean if r["peak_ts_req"] else None,
+                     "peak_ts_req_std": r["peak_ts_req"].std if r["peak_ts_req"] else None,
                      "ttfr_mean": r["ttfr"].mean if r["ttfr"] else None,
                      "ttfr_std": r["ttfr"].std if r["ttfr"] else None,
                      "est_ppt_mean": r["est_ppt"].mean if r["est_ppt"] else None,
