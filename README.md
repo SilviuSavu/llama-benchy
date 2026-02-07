@@ -172,7 +172,8 @@ Generally you don't need to disable prompt caching on the server, as a probabili
 -   `--concurrency`: List of concurrency levels (number of concurrent requests per test) (Default: [1]).
 -   `--save-result`: File to save results to.
 -   `--format`: Output format: 'md', 'json', 'csv' (Default: 'md').
--   `--save-all-throughput-data`: Save calculated throughput for each 1‑second window inside peak throughput calculation (Default: off).
+-   `--save-total-throughput-timeseries`: Save calculated TOTAL throughput for each 1 second window inside peak throughput calculation during the run (default: off).
+-   `--save-all-throughput-timeseries`: Save calculated throughput timeseries for EACH individual request (default: off).
 
 ### Metrics
 
@@ -323,7 +324,11 @@ date: 2026-02-06 16:36:05 | latency mode: generation
 ### Further analysis
 
 To perform additional analysis or generate any visualizations, you can output results in JSON or CSV. 
-JSON (`--format json`) will give you the most detailed data. If you specify `--save-all-throughput-data`, then JSON will include total throughput in 1 second intervals.
+JSON (`--format json`) will give you the most detailed data. If you specify `--save-total-throughput-data`, then JSON will include total throughput in 1 second intervals.
+
+- [Sample JSON file](schemas/sample.json)
+- [Sample JSON file with embedded documentation](schemas/sample.jsonc)
+- [JSON schema](schemas/benchmark_report_schema.json)
 
 You can also instantiate llama-benchy classes and run analysis directly from Python. See [Jupyter Notebook example](examples/benchmark_visualization.ipynb).
 
