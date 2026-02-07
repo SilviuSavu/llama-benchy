@@ -118,7 +118,7 @@ Example:
 
 ```bash
 llama-benchy \
-  --base-url http://localhost:8000/v1 \
+  --base-url http://spark:8888/v1 \
   --model openai/gpt-oss-120b \
   --depth 0 4096 8192 16384 32768 \
   --latency-mode generation
@@ -127,21 +127,21 @@ llama-benchy \
 Output:
 
 
-| model               |            test |             t/s |          ttfr (ms) |       est_ppt (ms) |      e2e_ttft (ms) |
-|:--------------------|----------------:|----------------:|-------------------:|-------------------:|-------------------:|
-| openai/gpt-oss-120b |          pp2048 | 2019.02 ± 34.98 |    1054.64 ± 17.57 |    1014.66 ± 17.57 |    1115.41 ± 18.70 |
-| openai/gpt-oss-120b |            tg32 |    52.94 ± 1.01 |                    |                    |                    |
-| openai/gpt-oss-120b |  pp2048 @ d4096 | 1994.49 ± 77.97 |   3129.18 ± 120.27 |   3089.19 ± 120.27 |   3198.97 ± 122.24 |
-| openai/gpt-oss-120b |    tg32 @ d4096 |    46.69 ± 1.11 |                    |                    |                    |
-| openai/gpt-oss-120b |  pp2048 @ d8192 | 1751.68 ± 34.44 |   5892.61 ± 114.68 |   5852.63 ± 114.68 |   5971.27 ± 115.77 |
-| openai/gpt-oss-120b |    tg32 @ d8192 |    40.40 ± 1.19 |                    |                    |                    |
-| openai/gpt-oss-120b | pp2048 @ d16384 | 1475.63 ± 31.41 |  12542.02 ± 265.86 |  12502.04 ± 265.86 |  12634.67 ± 269.43 |
-| openai/gpt-oss-120b |   tg32 @ d16384 |    33.86 ± 1.45 |                    |                    |                    |
-| openai/gpt-oss-120b | pp2048 @ d32768 | 1131.86 ± 50.53 | 30869.90 ± 1410.15 | 30829.92 ± 1410.15 | 30992.96 ± 1417.33 |
-| openai/gpt-oss-120b |   tg32 @ d32768 |    25.34 ± 1.31 |                    |                    |                    |
+| model               |            test |             t/s |     peak t/s |      ttfr (ms) |   est_ppt (ms) |   e2e_ttft (ms) |
+|:--------------------|----------------:|----------------:|-------------:|---------------:|---------------:|----------------:|
+| openai/gpt-oss-120b |          pp2048 | 8521.08 ± 69.61 |              |  297.14 ± 1.97 |  240.36 ± 1.97 |   340.65 ± 3.49 |
+| openai/gpt-oss-120b |            tg32 |    73.18 ± 0.45 | 75.84 ± 0.48 |                |                |                 |
+| openai/gpt-oss-120b |  pp2048 @ d4096 | 9450.36 ± 24.73 |              |  706.92 ± 1.70 |  650.14 ± 1.70 |   750.96 ± 3.08 |
+| openai/gpt-oss-120b |    tg32 @ d4096 |    72.22 ± 0.83 | 74.81 ± 0.86 |                |                |                 |
+| openai/gpt-oss-120b |  pp2048 @ d8192 | 8481.42 ± 38.50 |              | 1264.15 ± 5.50 | 1207.37 ± 5.50 |  1307.31 ± 6.20 |
+| openai/gpt-oss-120b |    tg32 @ d8192 |    71.78 ± 0.74 | 74.36 ± 0.77 |                |                |                 |
+| openai/gpt-oss-120b | pp2048 @ d16384 | 7954.96 ± 14.20 |              | 2373.83 ± 4.14 | 2317.05 ± 4.14 |  2418.63 ± 4.87 |
+| openai/gpt-oss-120b |   tg32 @ d16384 |    70.48 ± 0.84 | 73.02 ± 0.86 |                |                |                 |
+| openai/gpt-oss-120b | pp2048 @ d32768 |  6896.57 ± 4.62 |              | 5105.09 ± 3.38 | 5048.31 ± 3.38 |  5153.34 ± 2.87 |
+| openai/gpt-oss-120b |   tg32 @ d32768 |    65.80 ± 0.79 | 68.17 ± 0.82 |                |                |                 |
 
-llama-benchy (build: 75bc129)
-date: 2026-01-02 17:11:19 | latency mode: generation
+llama-benchy (0.2.2.dev1+g52d2b0d55.d20260206)
+date: 2026-02-06 15:52:14 | latency mode: generation
 
 -------
 
@@ -179,6 +179,7 @@ Generally you don't need to disable prompt caching on the server, as a probabili
 The script outputs a table with the following metrics. All time measurements are in milliseconds (ms).
 
 #### Latency Adjustment
+
 The script attempts to estimate network or processing latency to provide "server-side" processing times.
 - **Latency**: Measured based on `--latency-mode`.
   - `api`: Time to fetch `/models` (from sending request to getting first byte of the response). Eliminates network latency only.
@@ -221,7 +222,47 @@ When `--enable-prefix-caching` is used (with `--depth` > 0), the script performs
 
 In this case, `pp` and `tg` speeds will show an actual prompt processing / token generation speeds for a follow up prompt with a context pre-filled.
 
-### Example
+**Example**:
+
+```bash
+llama-benchy \
+  --base-url http://spark:8888/v1 \
+  --model openai/gpt-oss-120b \
+  --depth 0 4096 8192 16384 32768 \
+  --latency-mode generation \
+  --enable-prefix-caching
+```
+
+Output:
+
+
+| model               |            test |              t/s |      peak t/s |        ttfr (ms) |     est_ppt (ms) |    e2e_ttft (ms) |
+|:--------------------|----------------:|-----------------:|--------------:|-----------------:|-----------------:|-----------------:|
+| openai/gpt-oss-120b |          pp2048 | 8236.95 ± 134.25 |               |    298.95 ± 4.08 |    248.70 ± 4.08 |    342.07 ± 3.40 |
+| openai/gpt-oss-120b |            tg32 |     73.96 ± 1.19 |  76.63 ± 1.24 |                  |                  |                  |
+| openai/gpt-oss-120b |  ctx_pp @ d4096 |  9259.71 ± 76.35 |               |    492.62 ± 3.63 |    442.38 ± 3.63 |    535.67 ± 3.75 |
+| openai/gpt-oss-120b |  ctx_tg @ d4096 |     73.28 ± 0.80 |  75.93 ± 0.82 |                  |                  |                  |
+| openai/gpt-oss-120b |  pp2048 @ d4096 | 7467.44 ± 131.59 |               |    324.59 ± 4.84 |    274.34 ± 4.84 |    367.60 ± 4.95 |
+| openai/gpt-oss-120b |    tg32 @ d4096 |     72.25 ± 0.12 |  74.86 ± 0.12 |                  |                  |                  |
+| openai/gpt-oss-120b |  ctx_pp @ d8192 | 9177.24 ± 167.37 |               |   943.19 ± 16.45 |   892.94 ± 16.45 |    973.01 ± 5.31 |
+| openai/gpt-oss-120b |  ctx_tg @ d8192 |     73.43 ± 0.50 |  76.09 ± 0.54 |                  |                  |                  |
+| openai/gpt-oss-120b |  pp2048 @ d8192 | 6846.48 ± 135.57 |               |    349.50 ± 5.96 |    299.25 ± 5.96 |    394.26 ± 5.16 |
+| openai/gpt-oss-120b |    tg32 @ d8192 |     72.62 ± 0.66 |  75.23 ± 0.68 |                  |                  |                  |
+| openai/gpt-oss-120b | ctx_pp @ d16384 | 8235.05 ± 179.06 |               |  2040.75 ± 43.92 |  1990.50 ± 43.92 |  2073.53 ± 23.55 |
+| openai/gpt-oss-120b | ctx_tg @ d16384 |     73.87 ± 5.04 |  76.53 ± 5.22 |                  |                  |                  |
+| openai/gpt-oss-120b | pp2048 @ d16384 | 5441.56 ± 484.88 |               |   429.81 ± 35.96 |   379.57 ± 35.96 |   483.42 ± 48.92 |
+| openai/gpt-oss-120b |   tg32 @ d16384 |    62.80 ± 10.73 | 65.06 ± 11.12 |                  |                  |                  |
+| openai/gpt-oss-120b | ctx_pp @ d32768 | 6904.92 ± 217.24 |               | 4800.62 ± 151.68 | 4750.38 ± 151.68 | 4832.95 ± 157.53 |
+| openai/gpt-oss-120b | ctx_tg @ d32768 |     69.77 ± 5.32 |  72.29 ± 5.52 |                  |                  |                  |
+| openai/gpt-oss-120b | pp2048 @ d32768 | 4549.10 ± 105.92 |               |   500.69 ± 10.32 |   450.44 ± 10.32 |    548.23 ± 8.98 |
+| openai/gpt-oss-120b |   tg32 @ d32768 |     62.18 ± 6.87 |  64.59 ± 6.87 |                  |                  |                  |
+
+llama-benchy (0.2.2.dev1+g52d2b0d55.d20260206)
+date: 2026-02-06 16:15:38 | latency mode: generation
+
+### Combining multiple parameters
+
+You can specify multiple parameters for `--depth`, `--pp`, `--tg` and `--concurrency`. The benchmarks will run using the following hierarchy: depth -> pp -> tg -> concurrency.
 
 ```bash
 llama-benchy \
@@ -233,6 +274,58 @@ llama-benchy \
 ```
 
 This will run benchmarks for all combinations of pp (128, 256), tg (32, 64), and depth (0, 1024).
+
+### Concurrency measurement
+
+To test how the server performs in concurrent requests scenario, you can specify one or more concurrency levels using `--concurrency <N>` (e.g. `--concurrency 1 2 4`).
+
+When running with `concurrency > 1`, `llama-benchy` launches N parallel clients. The results table will include:
+*   **t/s (total)**: The aggregate throughput (tokens/sec) of all clients combined.
+*   **t/s (req)**: The average throughput per client.
+
+This allows you to measure how the server scales and find the saturation point where adding more clients doesn't increase the total throughput.
+
+Please note, that currently all batches run at the same time. If `--enable-prefix-caching` is used, then all prefill requests are executed simultaneously, followed by concurrent follow up requests.
+Other concurrency scenarios may be added in the future.
+
+**Example**
+
+```bash
+llama-benchy \
+  --base-url http://spark:8888/v1 \
+  --model openai/gpt-oss-120b \
+  --depth 0 4096 \
+  --latency-mode generation \
+  --enable-prefix-caching \
+  --concurrency 1 2
+```
+
+Output:
+
+| model               |                test |       t/s (total) |         t/s (req) |       peak t/s |       ttfr (ms) |    est_ppt (ms) |    e2e_ttft (ms) |
+|:--------------------|--------------------:|------------------:|------------------:|---------------:|----------------:|----------------:|-----------------:|
+| openai/gpt-oss-120b |         pp2048 (c1) |   7803.68 ± 63.74 |   7803.68 ± 63.74 |                |   292.86 ± 2.15 |   262.46 ± 2.15 |    337.08 ± 2.48 |
+| openai/gpt-oss-120b |           tg32 (c1) |      74.83 ± 0.59 |      74.83 ± 0.59 |   77.54 ± 0.62 |                 |                 |                  |
+| openai/gpt-oss-120b |         pp2048 (c2) |  7198.20 ± 541.69 | 4872.80 ± 1298.05 |                |  473.18 ± 85.71 |  442.77 ± 85.71 |   568.97 ± 40.44 |
+| openai/gpt-oss-120b |           tg32 (c2) |     111.27 ± 3.61 |      56.20 ± 1.27 |  115.25 ± 3.74 |                 |                 |                  |
+| openai/gpt-oss-120b | ctx_pp @ d4096 (c1) |   8816.20 ± 55.40 |   8816.20 ± 55.40 |                |   495.02 ± 2.91 |   464.62 ± 2.91 |    540.31 ± 1.64 |
+| openai/gpt-oss-120b | ctx_tg @ d4096 (c1) |      72.92 ± 0.63 |      72.92 ± 0.63 |   75.56 ± 0.67 |                 |                 |                  |
+| openai/gpt-oss-120b | pp2048 @ d4096 (c1) | 5918.71 ± 1447.23 | 5918.71 ± 1447.23 |                | 403.38 ± 110.24 | 372.98 ± 110.24 |   432.07 ± 90.02 |
+| openai/gpt-oss-120b |   tg32 @ d4096 (c1) |      65.27 ± 9.85 |      65.27 ± 9.85 |  67.62 ± 10.21 |                 |                 |                  |
+| openai/gpt-oss-120b | ctx_pp @ d4096 (c2) | 7934.38 ± 1145.70 |  4665.38 ± 660.55 |                | 928.79 ± 146.59 | 898.38 ± 146.59 | 1053.95 ± 165.93 |
+| openai/gpt-oss-120b | ctx_tg @ d4096 (c2) |     111.64 ± 3.25 |      56.38 ± 1.06 |  115.63 ± 3.36 |                 |                 |                  |
+| openai/gpt-oss-120b | pp2048 @ d4096 (c2) |  6659.05 ± 231.76 |  3623.78 ± 278.02 |                |  598.81 ± 42.34 |  568.40 ± 42.34 |   615.33 ± 22.02 |
+| openai/gpt-oss-120b |   tg32 @ d4096 (c2) |    116.93 ± 10.24 |      58.47 ± 5.12 | 121.11 ± 10.61 |                 |                 |                  |
+
+llama-benchy (0.2.2.dev1+g52d2b0d55.d20260206)
+date: 2026-02-06 16:36:05 | latency mode: generation
+
+### Further analysis
+
+To perform additional analysis or generate any visualizations, you can output results in JSON or CSV. 
+JSON (`--format json`) will give you the most detailed data. If you specify `--save-all-throughput-data`, then JSON will include total throughput in 1 second intervals.
+
+You can also instantiate llama-benchy classes and run analysis directly from Python. See [Jupyter Notebook example](examples/benchmark_visualization.ipynb).
 
 ## Development
 
