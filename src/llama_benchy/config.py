@@ -1,32 +1,31 @@
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 from typing import List, Optional
 import argparse
 import os
 from ._version import __version__
 
-@dataclass
-class BenchmarkConfig:
-    base_url: str
-    api_key: str
-    model: str
-    served_model_name: str
-    tokenizer: Optional[str]
-    pp_counts: List[int]
-    tg_counts: List[int]
-    depths: List[int]
-    num_runs: int
-    no_cache: bool
-    latency_mode: str
-    no_warmup: bool
-    adapt_prompt: bool
-    enable_prefix_caching: bool
-    book_url: str
-    post_run_cmd: Optional[str]
-    concurrency_levels: List[int]
-    save_result: Optional[str] = None
-    result_format: str = "md"
-    save_total_throughput_timeseries: bool = False
-    save_all_throughput_timeseries: bool = False
+class BenchmarkConfig(BaseModel):
+    base_url: str = Field(..., description="OpenAI compatible endpoint URL")
+    api_key: str = Field(..., description="API Key for the endpoint")
+    model: str = Field(..., description="Model name to use for benchmarking")
+    served_model_name: str = Field(..., description="Model name used in API calls (defaults to --model if not specified)")
+    tokenizer: Optional[str] = Field(None, description="HuggingFace tokenizer name (defaults to model name)")
+    pp_counts: List[int] = Field(..., description="List of prompt processing token counts")
+    tg_counts: List[int] = Field(..., description="List of token generation counts")
+    depths: List[int] = Field(..., description="List of context depths (previous conversation tokens)")
+    num_runs: int = Field(..., description="Number of runs per test")
+    no_cache: bool = Field(..., description="Ensure unique requests to avoid prefix caching")
+    latency_mode: str = Field(..., description="Method to measure latency: 'api', 'generation', or 'none'")
+    no_warmup: bool = Field(..., description="Skip warmup phase")
+    adapt_prompt: bool = Field(..., description="Adapt prompt size based on warmup token usage delta")
+    enable_prefix_caching: bool = Field(..., description="Enable prefix caching performance measurement")
+    book_url: str = Field(..., description="URL of a book to use for text generation")
+    post_run_cmd: Optional[str] = Field(None, description="Command to execute after each test run")
+    concurrency_levels: List[int] = Field(..., description="List of concurrency levels")
+    save_result: Optional[str] = Field(None, description="File to save results to")
+    result_format: str = Field("md", description="Output format (md, json, csv)")
+    save_total_throughput_timeseries: bool = Field(False, description="Save calculated TOTAL throughput for each 1 second window inside peak throughput calculation during the run.")
+    save_all_throughput_timeseries: bool = Field(False, description="Save calculated throughput timeseries for EACH individual request.")
 
     @classmethod
     def from_args(cls):

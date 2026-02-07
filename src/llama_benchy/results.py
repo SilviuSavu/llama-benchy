@@ -1,7 +1,7 @@
 import numpy as np
 from tabulate import tabulate
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, asdict
+from pydantic import BaseModel, Field
 import json
 import csv
 import sys
@@ -11,46 +11,52 @@ from .client import RequestResult
 # Type alias for a time series: List of [timestamp, value] pairs
 TimeSeries = List[List[float]]
 
-@dataclass
-class BenchmarkMetric:
-    mean: float
-    std: float
-    values: List[float]
+class BenchmarkMetric(BaseModel):
+    mean: float = Field(..., description="Mean value")
+    std: float = Field(..., description="Standard deviation")
+    values: List[float] = Field(..., description="Raw values")
 
-@dataclass
-class BenchmarkMetadata:
-    version: str
-    timestamp: str
-    latency_mode: str
-    latency_ms: float
-    model: str
-    prefix_caching_enabled: bool
-    max_concurrency: int
+class BenchmarkMetadata(BaseModel):
+    version: str = Field(..., description="Benchmark tool version")
+    timestamp: str = Field(..., description="Run timestamp")
+    latency_mode: str = Field(..., description="Latency measurement mode used")
+    latency_ms: float = Field(..., description=" measured or assumed latency in ms")
+    model: str = Field(..., description="Model name")
+    prefix_caching_enabled: bool = Field(..., description="Whether prefix caching was enabled")
+    max_concurrency: int = Field(..., description="Maximum concurrency level used in the suite")
 
-@dataclass
-class BenchmarkRun:
-    concurrency: int
-    context_size: int
-    prompt_size: int
-    response_size: int
-    is_context_prefill_phase: bool
+class BenchmarkRun(BaseModel):
+    concurrency: int = Field(..., description="Concurrency level for this run")
+    context_size: int = Field(..., description="Context size (prefix tokens)")
+    prompt_size: int = Field(..., description="Prompt size (tokens)")
+    response_size: int = Field(..., description="Response size (tokens)")
+    is_context_prefill_phase: bool = Field(..., description="Whether this was a context prefill phase run")
     
     # Metrics (using BenchmarkMetric)
-    pp_throughput: Optional[BenchmarkMetric]
-    pp_req_throughput: Optional[BenchmarkMetric]
-    tg_throughput: Optional[BenchmarkMetric]
-    tg_req_throughput: Optional[BenchmarkMetric]
-    peak_throughput: Optional[BenchmarkMetric]
-    peak_req_throughput: Optional[BenchmarkMetric]
-    ttfr: Optional[BenchmarkMetric]
-    est_ppt: Optional[BenchmarkMetric]
-    e2e_ttft: Optional[BenchmarkMetric]
+    pp_throughput: Optional[BenchmarkMetric] = Field(None, description="Prefill tokens per second (total)")
+    pp_req_throughput: Optional[BenchmarkMetric] = Field(None, description="Prefill tokens per second (per request)")
+    tg_throughput: Optional[BenchmarkMetric] = Field(None, description="Generation tokens per second (total)")
+    tg_req_throughput: Optional[BenchmarkMetric] = Field(None, description="Generation tokens per second (per request)")
+    peak_throughput: Optional[BenchmarkMetric] = Field(None, description="Peak generation tokens per second (total)")
+    peak_req_throughput: Optional[BenchmarkMetric] = Field(None, description="Peak generation tokens per second (per request)")
+    ttfr: Optional[BenchmarkMetric] = Field(None, description="Time to First Response (ms)")
+    est_ppt: Optional[BenchmarkMetric] = Field(None, description="Estimated pure processing time (ms)")
+    e2e_ttft: Optional[BenchmarkMetric] = Field(None, description="End-to-end Time to First Token (ms)")
     
     # List of time series, one per run (aggregated across all requests in that run)
-    throughput_over_time: Optional[List[TimeSeries]] = None
+    throughput_over_time: Optional[List[TimeSeries]] = Field(
+        None, 
+        description="A collection of time series data capturing the aggregated throughput over time. Each item in the list represents a sequence of [timestamp, value] pairs for a specific execution batch or iteration."
+    )
     
     # List of lists of time series, one list per run, containing one time series per request
-    requests_throughput_over_time: Optional[List[List[TimeSeries]]] = None
+    requests_throughput_over_time: Optional[List[List[TimeSeries]]] = Field(
+        None, 
+        description="A collection of time series data for individual requests. Organized as a list of lists, where the outer list represents batches and the inner list contains the throughput time series for each request in that batch."
+    )
+
+class BenchmarkReport(BenchmarkMetadata):
+    benchmarks: List[BenchmarkRun] = Field(..., description="List of benchmark run results")
 
 class BenchmarkResults:
     def __init__(self):
@@ -138,20 +144,20 @@ class BenchmarkResults:
             self.model_name = model
 
         # Aggregators
-        agg_pp_speeds = []
-        agg_tg_speeds = []
-        agg_ttft_values = []
-        agg_ttfr_values = []
-        agg_est_ppt_values = []
-        agg_e2e_ttft_values = []
+        agg_pp_speeds: List[float] = []
+        agg_tg_speeds: List[float] = []
+        agg_ttft_values: List[float] = []
+        agg_ttfr_values: List[float] = []
+        agg_est_ppt_values: List[float] = []
+        agg_e2e_ttft_values: List[float] = []
         
-        agg_batch_pp_throughputs = []
-        agg_batch_tg_throughputs = []
-        agg_peak_throughputs = []
-        agg_peak_req_throughputs = []
+        agg_batch_pp_throughputs: List[float] = []
+        agg_batch_tg_throughputs: List[float] = []
+        agg_peak_throughputs: List[float] = []
+        agg_peak_req_throughputs: List[float] = []
         
-        agg_throughput_series = []
-        agg_req_throughput_series = []
+        agg_throughput_series: List[TimeSeries] = []
+        agg_req_throughput_series: List[List[TimeSeries]] = []
 
         for batch in run_results:
             self._process_batch(
@@ -471,14 +477,21 @@ class BenchmarkResults:
                  print("\n" + output)
         
         elif format == "json":
-            data = asdict(self.metadata) if self.metadata else {}
-            data["benchmarks"] = [asdict(run) for run in self.runs]
+            output_data = {}
+            # Flatten metadata if present
+            if self.metadata:
+                output_data.update(self.metadata.model_dump())
+            
+            # Serialize runs
+            output_data["benchmarks"] = [run.model_dump() for run in self.runs]
+            
+            json_str = json.dumps(output_data, indent=2)
             
             if filename:
                  with open(filename, "w") as f:
-                     json.dump(data, f, indent=2)
+                     f.write(json_str)
             else:
-                 print(json.dumps(data, indent=2))
+                 print(json_str)
         
         elif format == "csv":
              rows = self._generate_rows()
@@ -506,11 +519,8 @@ class BenchmarkResults:
                  }
                  csv_rows.append(row)
              
-             output_file = filename if filename else sys.stdout
-             is_file = isinstance(output_file, str)
-             
-             if is_file:
-                 with open(output_file, "w", newline="") as f:
+             if filename:
+                 with open(filename, "w", newline="") as f:
                       writer = csv.DictWriter(f, fieldnames=headers)
                       writer.writeheader()
                       writer.writerows(csv_rows)

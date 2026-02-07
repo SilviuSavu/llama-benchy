@@ -56,7 +56,7 @@ class LLMClient:
                 print(f"Error measuring latency: {e}")
         
         if latencies:
-            avg_latency = np.mean(latencies)
+            avg_latency = float(np.mean(latencies))
             print(f"Average latency ({mode}): {avg_latency*1000:.2f} ms")
             return avg_latency
         return 0
