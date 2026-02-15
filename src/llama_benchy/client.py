@@ -171,7 +171,7 @@ class LLMClient:
                                 json_str = line[5:].strip()
                                 chunk = json.loads(json_str)
 
-                                if 'usage' in chunk:
+                                if 'usage' in chunk and chunk['usage'] is not None:
                                     result.prompt_tokens = chunk['usage'].get('prompt_tokens', 0)
                                 
                                 if 'choices' in chunk and len(chunk['choices']) > 0:
