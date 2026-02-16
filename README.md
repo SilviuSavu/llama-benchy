@@ -30,7 +30,7 @@ As of January 2nd, 2026, I wasn't able to find any existing benchmarking tool th
 - Configurable latency measurement mode.
 - Supports concurrent requests (`--concurrency`) to measure throughput under load.
 - Can save results to file in Markdown, JSON, or CSV format.
-- Can save granular time-series data for token generation when JSON output is used (`--save-total-throughput-timeseries` and `--save-total-throughput-timeseries`).
+- Can save granular time-series data for token generation when JSON output is used (`--save-total-throughput-timeseries` and `--save-all-throughput-timeseries`).
 
 # Current Limitations
 
@@ -92,7 +92,7 @@ cd llama-benchy
 uv run llama-benchy --base-url <ENDPOINT_URL> --model <MODEL_NAME>
 ```
 
-### Option 3: Install into system path
+### Option 4: Install into system path
 
 Release version from PyPI:
 
@@ -324,7 +324,7 @@ date: 2026-02-06 16:36:05 | latency mode: generation
 ### Further analysis
 
 To perform additional analysis or generate any visualizations, you can output results in JSON or CSV. 
-JSON (`--format json`) will give you the most detailed data. If you specify `--save-total-throughput-data`, then JSON will include total throughput in 1 second intervals.
+JSON (`--format json`) will give you the most detailed data. If you specify `--save-total-throughput-timeseries`, then JSON will include total throughput in 1 second intervals.
 
 - [Sample JSON file](schemas/sample.json)
 - [Sample JSON file with embedded documentation](schemas/sample.jsonc)
