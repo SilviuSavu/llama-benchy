@@ -19,11 +19,12 @@ class RequestResult:
     token_timestamps: List[float] = field(default_factory=list)
 
 class LLMClient:
-    def __init__(self, base_url: str, api_key: str, model_name: str):
+    def __init__(self, base_url: str, api_key: str, model_name: str, tokenizer=None):
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
         self.headers = {"Authorization": f"Bearer {api_key}"}
+        self.tokenizer = tokenizer
 
     async def measure_latency(self, session: aiohttp.ClientSession, mode: str = "api") -> float:
         if mode == "none":
@@ -151,21 +152,22 @@ class LLMClient:
 
                 decoder = codecs.getincrementaldecoder("utf-8")(errors='replace')
                 buffer = ""
-                
+                accumulated_text = ""
+
                 async for chunk_bytes in response.content:
                     chunk_time = time.perf_counter()
                     decoded_chunk = decoder.decode(chunk_bytes, final=False)
                     buffer += decoded_chunk
-                    
+
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
                         line = line.strip()
                         if not line:
                             continue
-                        
+
                         if line == 'data: [DONE]' or line == 'data:[DONE]':
                             continue
-                        
+
                         if line.startswith('data:'):
                             try:
                                 json_str = line[5:].strip()
@@ -173,7 +175,7 @@ class LLMClient:
 
                                 if 'usage' in chunk and chunk['usage'] is not None:
                                     result.prompt_tokens = chunk['usage'].get('prompt_tokens', 0)
-                                
+
                                 if 'choices' in chunk and len(chunk['choices']) > 0:
                                     if result.first_response_ts is None:
                                         result.first_response_ts = chunk_time
@@ -182,17 +184,24 @@ class LLMClient:
                                     content = delta.get('content')
                                     reasoning_content = delta.get('reasoning_content')
                                     reasoning = delta.get('reasoning')
-                                    
+
                                     if content or reasoning_content or reasoning:
                                         if result.first_token_ts is None:
                                             result.first_token_ts = chunk_time
-                                        
+
                                         result.total_tokens += 1
                                         result.token_timestamps.append(chunk_time)
+                                        accumulated_text += content or reasoning_content or reasoning or ""
                             except json.JSONDecodeError:
                                 continue
-            
+
             result.end_ts = time.perf_counter()
+
+            # Use local tokenizer count if available (more accurate than SSE chunk counting)
+            if self.tokenizer and accumulated_text:
+                local_count = len(self.tokenizer.encode(accumulated_text, add_special_tokens=False))
+                if local_count > 0:
+                    result.total_tokens = local_count
 
         except Exception as e:
             print(f"Error during run: {e}")
